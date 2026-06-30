@@ -1,5 +1,7 @@
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
+import { useState } from 'react';
 import { formatAmount, formatCoin } from '../../domain/amount.js';
+import { copyToClipboard, openUrl } from '../../shared/system.js';
 import type { AccountRef, HistoryItem } from '../../engine/types.js';
 import type { Screen } from '../app.js';
 import { SelectList, type SelectItem } from '../components/SelectList.js';
@@ -20,6 +22,18 @@ export function DashboardScreen({
   const balance = useAsync(() => app.balances.getTon(account), [account.address]);
   const jettons = useAsync(() => app.balances.getJettons(account), [account.address]);
   const history = useAsync(() => app.history.recent(account, { limit: 5 }), [account.address]);
+  const [status, setStatus] = useState('');
+
+  useInput((input) => {
+    if (input === 'c') {
+      void copyToClipboard(account.address)
+        .then(() => setStatus('✓ address copied to clipboard'))
+        .catch(() => setStatus('✗ could not access the clipboard'));
+    } else if (input === 'o') {
+      openUrl(app.receive.explorerUrl(account.address));
+      setStatus('✓ opened in your browser (tonviewer)');
+    }
+  });
 
   const items: SelectItem<Screen>[] = [
     { label: 'Send', value: 'send', hint: 'transfer GRAM or a jetton' },
@@ -62,6 +76,8 @@ export function DashboardScreen({
       <Box marginTop={1} flexDirection="column">
         <SelectList items={items} onSelect={onNavigate} />
       </Box>
+      {status ? <Text color="green">{status}</Text> : null}
+      <Text dimColor>c copy address · o open in explorer</Text>
     </Box>
   );
 }
