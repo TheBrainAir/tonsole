@@ -29,6 +29,8 @@ export interface TonConnect {
   onConnectRequest(handler: (req: ConnectRequest) => Promise<boolean>): void;
   onTransactionRequest(handler: (req: ConnectTxRequest) => Promise<boolean>): void;
   onDisconnect(handler: () => void): void;
+  /** Surface bridge / request errors (e.g. a failed connection or broadcast). */
+  onError(handler: (message: string) => void): void;
   listSessions(): Promise<TonConnectSessionInfo[]>;
   disconnect(sessionId?: string): Promise<void>;
 }
