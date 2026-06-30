@@ -1,8 +1,9 @@
 import { Box, Text, useInput } from 'ink';
 import { useState } from 'react';
 import { NETWORKS } from '../../config/networks.js';
-import { formatAmount, formatCoin } from '../../domain/amount.js';
+import { formatAmount, formatCoin, formatTon } from '../../domain/amount.js';
 import type { AccountRef, HistoryItem, NetworkId } from '../../engine/types.js';
+import { copyToClipboard, openUrl } from '../../shared/system.js';
 import { Loading } from '../components/ui.js';
 import { useApp } from '../context.js';
 import { useAsync } from '../hooks/useAsync.js';
@@ -14,13 +15,46 @@ export function HistoryScreen({ account }: { account: AccountRef }) {
   const history = useAsync(() => app.history.recent(account, { limit: 50 }), [account.address]);
   const items = history.data?.items ?? [];
   const [selected, setSelected] = useState(0);
+  const [status, setStatus] = useState('');
+
+  const explorerFor = (item: HistoryItem) => NETWORKS[account.network].explorerTx(item.hash);
+
+  const copyField = (item: HistoryItem, field: 'address' | 'hash' | 'memo') => {
+    const text =
+      field === 'address' ? item.counterparty : field === 'hash' ? item.hash : item.comment;
+    if (!text) {
+      setStatus(`(no ${field} to copy)`);
+      return;
+    }
+    void copyToClipboard(text)
+      .then(() => setStatus(`✓ ${field} copied to clipboard`))
+      .catch(() => setStatus('✗ could not access the clipboard'));
+  };
 
   useInput(
     (input, key) => {
-      if (key.upArrow || input === 'k') setSelected((i) => Math.max(0, i - 1));
-      else if (key.downArrow || input === 'j') setSelected((i) => Math.min(items.length - 1, i + 1));
-      else if (key.pageUp) setSelected((i) => Math.max(0, i - WINDOW));
-      else if (key.pageDown) setSelected((i) => Math.min(items.length - 1, i + WINDOW));
+      if (items.length === 0) return;
+      const i = Math.min(selected, items.length - 1);
+      if (key.upArrow || input === 'k') {
+        setSelected(Math.max(0, i - 1));
+        setStatus('');
+      } else if (key.downArrow || input === 'j') {
+        setSelected(Math.min(items.length - 1, i + 1));
+        setStatus('');
+      } else if (key.pageUp) {
+        setSelected(Math.max(0, i - WINDOW));
+      } else if (key.pageDown) {
+        setSelected(Math.min(items.length - 1, i + WINDOW));
+      } else if (input === 'c') {
+        copyField(items[i]!, 'address');
+      } else if (input === 'h') {
+        copyField(items[i]!, 'hash');
+      } else if (input === 'm') {
+        copyField(items[i]!, 'memo');
+      } else if (input === 'o' || key.return) {
+        openUrl(explorerFor(items[i]!));
+        setStatus('✓ opened in your browser (tonviewer)');
+      }
     },
     { isActive: items.length > 0 },
   );
@@ -73,7 +107,8 @@ export function HistoryScreen({ account }: { account: AccountRef }) {
       <Box marginTop={1}>
         <Detail item={current} network={account.network} />
       </Box>
-      <Text dimColor>↑↓ navigate · esc back</Text>
+      {status ? <Text color="green">{status}</Text> : null}
+      <Text dimColor>↑↓ navigate · c copy address · h hash · m memo · o/⏎ open in tonviewer · esc back</Text>
     </Box>
   );
 }
@@ -109,6 +144,8 @@ function Detail({ item, network }: { item: HistoryItem; network: NetworkId }) {
         </Text>
       ) : null}
       {item.comment ? <Text>memo: &quot;{item.comment}&quot;</Text> : null}
+      {item.fee !== undefined ? <Text dimColor>fee : {formatTon(item.fee)} GRAM</Text> : null}
+      <Text dimColor>hash: {item.hash}</Text>
       <Text dimColor>{new Date(item.timestamp * 1000).toISOString().replace('T', ' ').slice(0, 19)}</Text>
       <Text dimColor>{NETWORKS[network].explorerTx(item.hash)}</Text>
     </Box>
