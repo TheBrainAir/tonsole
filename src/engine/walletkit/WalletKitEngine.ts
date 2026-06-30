@@ -94,6 +94,8 @@ type WalletKitInstance = InstanceType<typeof wk.TonWalletKit>;
 type WkNetwork = ReturnType<typeof wk.Network.testnet>;
 
 const TONCONNECT_BRIDGE_URL = 'https://connect.ton.org/bridge';
+// @ton/core SendMode.CARRY_ALL_REMAINING_BALANCE — send the entire balance (fees deducted from it).
+const SEND_ALL = 128;
 
 const laterMilestone = (feature: string): AppError =>
   new AppError('EngineUnsupported', `${feature} is not implemented yet (coming in a later milestone).`);
@@ -205,6 +207,14 @@ export class WalletKitEngine implements WalletEngine {
     return { nano, decimals: 9 };
   }
 
+  async resolveName(name: string): Promise<string | null> {
+    const client = this.#requireKit().getApiClient(this.#wkNetwork(this.#deps.network));
+    const resolved = await client.resolveDnsWallet(name);
+    return resolved
+      ? toFriendly(parseAddress(String(resolved)), { network: this.#deps.network, bounceable: false })
+      : null;
+  }
+
   async getJettons(): Promise<JettonBalance[]> {
     throw laterMilestone('Jetton balances');
   }
@@ -251,7 +261,8 @@ export class WalletKitEngine implements WalletEngine {
               recipientAddress: normalizeRecipient(intent.to, acct.network),
               transferAmount: intent.amount.toString(),
               ...comment,
-            })
+              ...(intent.max ? { mode: SEND_ALL } : {}),
+            } as Parameters<typeof wallet.createTransferTonTransaction>[0])
           : intent.kind === 'jetton'
             ? await wallet.createTransferJettonTransaction({
                 jettonAddress: normalizeRecipient(intent.jettonMaster, acct.network),
@@ -283,7 +294,7 @@ export class WalletKitEngine implements WalletEngine {
   /** TON sends need enough TON for the amount; jetton sends only need gas (caught by
    *  emulation), and the jetton amount is validated by the service layer. */
   async #preCheckTonBalance(acct: AccountRef, intent: TransferIntent): Promise<void> {
-    if (intent.kind !== 'ton') return;
+    if (intent.kind !== 'ton' || intent.max) return;
     const { nano } = await this.getBalance(acct);
     if (nano < intent.amount) {
       throw new AppError(

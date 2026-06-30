@@ -27,8 +27,8 @@ export function registerSendCommand(program: Command): void {
   program
     .command('send')
     .description('Send GRAM, a jetton, or an NFT to an address — emulated and confirmed first')
-    .argument('<to>', 'recipient address')
-    .argument('[amount]', 'amount to send for GRAM/jetton (omit for --nft)')
+    .argument('<to>', 'recipient address or .ton name')
+    .argument('[amount]', 'amount for GRAM/jetton, or "max" to send all GRAM (omit for --nft)')
     .option('-c, --comment <text>', 'attach a text comment to the transfer')
     .option('--jetton <master>', 'send a jetton (by its master address) instead of GRAM')
     .option('--nft <address>', 'send an NFT (by its item address) instead of GRAM')
@@ -60,14 +60,23 @@ export function registerSendCommand(program: Command): void {
                   passphrase,
                   confirm,
                 })
-              : await app.transfers.sendTon({
-                  to,
-                  amount: parseTon(requireAmount(amount)),
-                  comment: opts.comment,
-                  from: opts.from,
-                  passphrase,
-                  confirm,
-                });
+              : /^(max|all)$/i.test((amount ?? '').trim())
+                ? await app.transfers.sendTon({
+                    to,
+                    sendMax: true,
+                    comment: opts.comment,
+                    from: opts.from,
+                    passphrase,
+                    confirm,
+                  })
+                : await app.transfers.sendTon({
+                    to,
+                    amount: parseTon(requireAmount(amount)),
+                    comment: opts.comment,
+                    from: opts.from,
+                    passphrase,
+                    confirm,
+                  });
 
           if (globals.json) {
             printJson({ hash: result.hash, status: result.status, explorer: result.explorerUrl });

@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from 'ink';
 import { useRef, useState } from 'react';
-import { isValidAddress } from '../../domain/address.js';
+import { isDnsName, isValidAddress } from '../../domain/address.js';
 import { formatAmount, formatCoin, parseTon } from '../../domain/amount.js';
 import { AppError } from '../../engine/errors.js';
 import type { AccountRef, AssetDelta, TxPreview } from '../../engine/types.js';
@@ -53,8 +53,8 @@ export function SendScreen({
   };
 
   const submit = () => {
-    if (!isValidAddress(to)) {
-      fail(new AppError('InvalidAddress', `Invalid recipient address: "${to}"`));
+    if (!isValidAddress(to) && !isDnsName(to)) {
+      fail(new AppError('InvalidAddress', `Invalid recipient (address or .ton name): "${to}"`));
       return;
     }
     if (!isNft && amount.trim() === '') {
@@ -76,6 +76,7 @@ export function SendScreen({
         resolverRef.current = resolve;
       });
 
+    const wantsMax = !preset && /^(max|all)$/i.test(amount.trim());
     let sending: Promise<SentResult>;
     try {
       sending =
@@ -83,7 +84,9 @@ export function SendScreen({
           ? app.transfers.sendNft({ to, nftAddress: preset.address, comment: comm, from: account.address, passphrase, confirm })
           : preset?.kind === 'jetton'
             ? app.transfers.sendJetton({ to, jettonMaster: preset.master, amount, comment: comm, from: account.address, passphrase, confirm })
-            : app.transfers.sendTon({ to, amount: parseTon(amount), comment: comm, from: account.address, passphrase, confirm });
+            : wantsMax
+              ? app.transfers.sendTon({ to, sendMax: true, comment: comm, from: account.address, passphrase, confirm })
+              : app.transfers.sendTon({ to, amount: parseTon(amount), comment: comm, from: account.address, passphrase, confirm });
     } catch (e) {
       passphrase.destroy();
       fail(e);
@@ -175,7 +178,7 @@ export function SendScreen({
           onChange={setTo}
           focus={field === 'to'}
           onSubmit={() => setField(isNft ? 'comment' : 'amount')}
-          placeholder="recipient address"
+          placeholder="address or name.ton"
         />
         {!isNft ? (
           <TextField
@@ -184,7 +187,7 @@ export function SendScreen({
             onChange={setAmount}
             focus={field === 'amount'}
             onSubmit={() => setField('comment')}
-            placeholder={isJetton ? `${assetLabel}, e.g. 10.5` : 'GRAM, e.g. 1.5'}
+            placeholder={isJetton ? `${assetLabel}, e.g. 10.5` : "GRAM, e.g. 1.5 or 'max'"}
           />
         ) : null}
         <TextField
@@ -215,6 +218,7 @@ export function SendScreen({
 function sentLabel(preset: SendPreset | null | undefined, amount: string): string {
   if (preset?.kind === 'nft') return `NFT ${preset.name ?? ''}`.trim();
   if (preset?.kind === 'jetton') return `${amount} ${preset.symbol ?? 'jetton'}`;
+  if (/^(max|all)$/i.test(amount.trim())) return 'all GRAM';
   return formatCoin(parseTon(amount));
 }
 
