@@ -51,3 +51,22 @@ export function sameAddress(a: string, b: string): boolean {
     return false;
   }
 }
+
+/**
+ * Normalize a recipient address to the user-friendly form for the active network,
+ * preserving the bounceable flag the user supplied (raw input defaults to
+ * non-bounceable, the right choice for sending to a wallet).
+ */
+export function normalizeRecipient(input: string, network: NetworkId): string {
+  const trimmed = input.trim();
+  try {
+    const { address, isBounceable } = Address.parseFriendly(trimmed);
+    return address.toString({ urlSafe: true, testOnly: network === 'testnet', bounceable: isBounceable });
+  } catch {
+    return parseAddress(trimmed).toString({
+      urlSafe: true,
+      testOnly: network === 'testnet',
+      bounceable: false,
+    });
+  }
+}

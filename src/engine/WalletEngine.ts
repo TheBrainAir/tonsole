@@ -68,4 +68,16 @@ export interface WalletEngine {
   preview(acct: AccountRef, tx: UnsignedTransfer): Promise<TxPreview>;
   sign(acct: AccountRef, tx: UnsignedTransfer, ctx: SigningContext): Promise<SignedTransaction>;
   send(acct: AccountRef, signed: SignedTransaction): Promise<SendResult>;
+
+  /**
+   * Optional high-level saga for engines (WalletKit) that need the signer present
+   * for the whole build -> emulate -> send flow. `onPreview` receives the emulated
+   * money-flow; returning false aborts before anything is broadcast.
+   */
+  transfer?(
+    acct: AccountRef,
+    intent: TransferIntent,
+    ctx: SigningContext,
+    onPreview?: (preview: TxPreview) => Promise<boolean>,
+  ): Promise<SendResult>;
 }

@@ -3,10 +3,10 @@ import type { Config } from '../config/schema.js';
 import { parseAddress, toRaw } from '../domain/address.js';
 import { normalizeMnemonic } from '../domain/mnemonic.js';
 import { AppError } from '../engine/errors.js';
-import type { WalletEngine } from '../engine/WalletEngine.js';
+import type { SigningContext, WalletEngine } from '../engine/WalletEngine.js';
 import type { AccountRef, WalletVersion } from '../engine/types.js';
-import { type KeystoreTonMeta, encryptKeystore } from '../secrets/ArgonKeystore.js';
-import { listKeystores, saveKeystore } from '../secrets/keystore-file.js';
+import { type KeystoreTonMeta, decryptKeystore, encryptKeystore } from '../secrets/ArgonKeystore.js';
+import { findKeystore, listKeystores, saveKeystore } from '../secrets/keystore-file.js';
 import type { SecretString } from '../secrets/secret-string.js';
 
 export interface StoredAccount {
@@ -91,6 +91,22 @@ export class AccountService {
     const acct = this.resolve(idOrAddress);
     saveConfigPatch({ defaultAccount: acct.id });
     return acct;
+  }
+
+  /**
+   * A keystore-backed SigningContext for an account: it decrypts the mnemonic with
+   * the passphrase only inside `withMnemonic`, minimizing the plaintext's lifetime.
+   */
+  signingContext(account: StoredAccount, passphrase: SecretString): SigningContext {
+    const found = findKeystore(account.id);
+    if (!found) throw new AppError('KeystoreNotFound', `Keystore ${account.id} not found.`);
+    const { keystore } = found;
+    return {
+      async withMnemonic(fn) {
+        const mnemonic = await passphrase.use((pass) => decryptKeystore(keystore, pass));
+        return fn(mnemonic.split(' '));
+      },
+    };
   }
 
   async #persist(
