@@ -61,6 +61,7 @@ export function ConnectScreen({ account }: { account: AccountRef }) {
             }),
         );
         tc.onDisconnect(() => setStatus('the dApp disconnected'));
+        tc.onError((message) => setStatus(`Error: ${message}`));
         setPhase('ready');
         setStatus('Unlocked. Paste a dApp connection link below.');
       })

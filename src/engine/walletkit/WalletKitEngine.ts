@@ -43,6 +43,11 @@ function extractErrorMessage(error: unknown): string {
   return 'Transaction emulation failed.';
 }
 
+function describeRequestError(event: unknown): string {
+  const e = event as { error?: { message?: string }; message?: string } | undefined;
+  return e?.error?.message ?? e?.message ?? 'TON Connect request error';
+}
+
 /** Map a WalletKit emulated preview into our engine-agnostic TxPreview. */
 function mapEmulatedPreview(
   preview: RawEmulatedPreview,
@@ -286,6 +291,10 @@ export class WalletKitEngine implements WalletEngine {
 
   tonConnect(): TonConnect {
     const kit = this.#requireKit();
+    let errorHandler: ((message: string) => void) | undefined;
+    const reportError = (e: unknown): void =>
+      errorHandler?.(e instanceof Error ? e.message : String(e));
+    kit.onRequestError((event) => errorHandler?.(describeRequestError(event)));
     return {
       unlock: async (account, ctx) => {
         await ctx.withMnemonic(async (mnemonic) => {
@@ -316,7 +325,7 @@ export class WalletKitEngine implements WalletEngine {
               if (ok) await kit.approveConnectRequest(event);
               else await kit.rejectConnectRequest(event, 'Rejected by user');
             })
-            .catch(() => undefined);
+            .catch(reportError);
         });
       },
       onTransactionRequest: (handler) => {
@@ -328,10 +337,13 @@ export class WalletKitEngine implements WalletEngine {
               if (ok) await kit.approveTransactionRequest(event);
               else await kit.rejectTransactionRequest(event, 'Rejected by user');
             })
-            .catch(() => undefined);
+            .catch(reportError);
         });
       },
       onDisconnect: (handler) => kit.onDisconnect(() => handler()),
+      onError: (handler) => {
+        errorHandler = handler;
+      },
       listSessions: async () => {
         const sessions = await kit.listSessions();
         return sessions.map((s): TonConnectSessionInfo => {
