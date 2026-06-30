@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AppError } from '../engine/errors.js';
-import { isValidAddress, parseAddress, sameAddress, toFriendly, toRaw } from './address.js';
+import { isDnsName, isValidAddress, parseAddress, sameAddress, toFriendly, toRaw } from './address.js';
 
 // Same V5R1 account rendered two ways (captured from the M0 derivation cross-check):
 const EQ = 'EQBfBlddiaxlpNgkKlBOvEcBai7TnoaJBq8ROWl8s3ZsiaUV'; // bounceable, mainnet
@@ -16,6 +16,14 @@ describe('address', () => {
     const raw = toRaw(parseAddress(EQ));
     expect(raw.startsWith('0:')).toBe(true);
     expect(toRaw(parseAddress(raw))).toBe(raw);
+  });
+
+  it('detects .ton / .t.me names but not addresses', () => {
+    expect(isDnsName('foundation.ton')).toBe(true);
+    expect(isDnsName('alice.t.me')).toBe(true);
+    expect(isDnsName(EQ)).toBe(false);
+    expect(isDnsName('0:abc')).toBe(false);
+    expect(isDnsName('.ton')).toBe(false);
   });
 
   it('renders non-bounceable UQ for wallet display, bounceable EQ on request', () => {

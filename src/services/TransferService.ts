@@ -1,5 +1,5 @@
 import { NETWORKS } from '../config/networks.js';
-import { sameAddress } from '../domain/address.js';
+import { isDnsName, sameAddress } from '../domain/address.js';
 import { parseAmount } from '../domain/amount.js';
 import { AppError } from '../engine/errors.js';
 import type { WalletEngine } from '../engine/WalletEngine.js';
@@ -19,8 +19,10 @@ interface BaseSendParams {
 }
 
 export interface SendTonParams extends BaseSendParams {
-  /** Amount in nanotons. */
-  amount: bigint;
+  /** Amount in nanotons (ignored when sendMax is set). */
+  amount?: bigint;
+  /** Send the entire balance (minus fees) via send-mode 128. */
+  sendMax?: boolean;
 }
 
 export interface SendJettonParams extends BaseSendParams {
@@ -49,10 +51,17 @@ export class TransferService {
 
   async sendTon(params: SendTonParams): Promise<SentResult> {
     const stored = this.accounts.resolve(params.from);
+    const to = await this.#resolveRecipient(params.to);
+    let amount = params.amount ?? 0n;
+    if (params.sendMax) {
+      amount = (await this.engine.getBalance(stored.account)).nano;
+    } else if (params.amount === undefined) {
+      throw new AppError('InvalidAmount', 'An amount is required.');
+    }
     const ctx = this.accounts.signingContext(stored, params.passphrase);
     const result = await this.#transfer()(
       stored.account,
-      { kind: 'ton', to: params.to, amount: params.amount, comment: params.comment },
+      { kind: 'ton', to, amount, comment: params.comment, max: params.sendMax },
       ctx,
       params.confirm,
     );
@@ -61,6 +70,7 @@ export class TransferService {
 
   async sendJetton(params: SendJettonParams): Promise<SentResult> {
     const stored = this.accounts.resolve(params.from);
+    const to = await this.#resolveRecipient(params.to);
     const held = (await this.indexer.getJettons(stored.account)).find((j) =>
       sameAddress(j.master, params.jettonMaster),
     );
@@ -76,7 +86,7 @@ export class TransferService {
     const ctx = this.accounts.signingContext(stored, params.passphrase);
     const result = await this.#transfer()(
       stored.account,
-      { kind: 'jetton', jettonMaster: held.master, to: params.to, amount, decimals: held.decimals, comment: params.comment },
+      { kind: 'jetton', jettonMaster: held.master, to, amount, decimals: held.decimals, comment: params.comment },
       ctx,
       params.confirm,
     );
@@ -85,6 +95,7 @@ export class TransferService {
 
   async sendNft(params: SendNftParams): Promise<SentResult> {
     const stored = this.accounts.resolve(params.from);
+    const to = await this.#resolveRecipient(params.to);
     const owned = (await this.indexer.getNfts(stored.account)).some((n) =>
       sameAddress(n.address, params.nftAddress),
     );
@@ -94,11 +105,23 @@ export class TransferService {
     const ctx = this.accounts.signingContext(stored, params.passphrase);
     const result = await this.#transfer()(
       stored.account,
-      { kind: 'nft', nftAddress: params.nftAddress, to: params.to, comment: params.comment },
+      { kind: 'nft', nftAddress: params.nftAddress, to, comment: params.comment },
       ctx,
       params.confirm,
     );
     return this.#withExplorer(result, stored.account.network);
+  }
+
+  /** Resolve a `.ton`/`.t.me` name to an address; pass through plain addresses. */
+  async #resolveRecipient(to: string): Promise<string> {
+    if (!isDnsName(to)) return to;
+    const resolve = this.engine.resolveName?.bind(this.engine);
+    if (!resolve) {
+      throw new AppError('EngineUnsupported', 'DNS names are not supported by the active engine.');
+    }
+    const address = await resolve(to);
+    if (!address) throw new AppError('InvalidAddress', `Could not resolve the name "${to}".`);
+    return address;
   }
 
   #transfer(): NonNullable<WalletEngine['transfer']> {

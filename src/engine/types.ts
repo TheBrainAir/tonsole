@@ -64,7 +64,7 @@ export interface NftItem {
 
 /** What the UI submits to build a transfer. */
 export type TransferIntent =
-  | { kind: 'ton'; to: string; amount: bigint; comment?: string; bounce?: boolean }
+  | { kind: 'ton'; to: string; amount: bigint; comment?: string; bounce?: boolean; max?: boolean }
   | {
       kind: 'jetton';
       jettonMaster: string;

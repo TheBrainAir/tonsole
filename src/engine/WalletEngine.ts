@@ -83,6 +83,8 @@ export interface WalletEngine {
   getBalance(acct: AccountRef): Promise<Balance>;
   getJettons(acct: AccountRef): Promise<JettonBalance[]>;
   getHistory(acct: AccountRef, cursor?: string, limit?: number): Promise<Page<HistoryItem>>;
+  /** Resolve a .ton / .t.me DNS name to a wallet address (friendly form), or null if unset. */
+  resolveName?(name: string): Promise<string | null>;
 
   // ---- write pipeline: build -> preview(emulate) -> sign -> send ----
   buildTransfer(acct: AccountRef, intent: TransferIntent): Promise<UnsignedTransfer>;

@@ -23,6 +23,13 @@ export function isValidAddress(input: string): boolean {
   }
 }
 
+/** A TON DNS name (e.g. `alice.ton`) or Telegram domain (`alice.t.me`), not an address. */
+export function isDnsName(input: string): boolean {
+  const s = input.trim().toLowerCase();
+  if (!/^[a-z0-9.-]+$/.test(s)) return false;
+  return (s.endsWith('.ton') && s.length > 4) || (s.endsWith('.t.me') && s.length > 5);
+}
+
 /** Canonical raw form, e.g. "0:abcd…". Use this for storage and comparison. */
 export function toRaw(address: Address): string {
   return address.toRawString();
