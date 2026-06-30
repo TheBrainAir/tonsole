@@ -26,6 +26,7 @@ export function DashboardScreen({
     { label: 'Receive', value: 'receive', hint: 'address & QR' },
     { label: 'History', value: 'history' },
     { label: 'Jettons', value: 'jettons' },
+    { label: 'Connect', value: 'connect', hint: 'link a dApp (TON Connect)' },
     ...(multipleAccounts ? [{ label: 'Switch account', value: 'accounts' as Screen }] : []),
   ];
 

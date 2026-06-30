@@ -10,8 +10,9 @@ scriptable **Commander CLI** commands. **ESM-only, Node ≥ 22.12, React 19** (f
 
 Status: the **v1 core is functional — milestones M0–M4 are complete**: encrypted keystore + create/import,
 balances (GRAM + jettons), send (GRAM + jettons) with an emulation preview + confirmation, receive + QR,
-transaction history, and a full interactive **Ink TUI** (`src/tui/`) plus the scriptable CLI. M5 (TON
-Connect) and M6 (NFTs + packaging) remain. See the roadmap below.
+transaction history, a full interactive **Ink TUI** (`src/tui/`) plus the scriptable CLI, and **TON
+Connect** (approve dApp connections/transactions from the terminal). M6 (NFTs + packaging) remains. See
+the roadmap below.
 
 ## Commands
 
@@ -47,8 +48,8 @@ relative imports raw Node can't resolve, and Node can't statically bind its *nam
   `@ton/crypto`, `@ton/ton` stay external (well-formed, shared at runtime); `argon2` stays external (native).
 - The ESM bundle needs a `require` shim (createRequire banner in `tsup.config.ts`) because a bundled CJS
   dep (tweetnacl) calls `require('crypto')`.
-- `EventSource` is not a Node global; needed **only** for the TON Connect bridge (M5) — add an `eventsource`
-  polyfill then. Core wallet ops use `fetch` (present in Node 22).
+- `EventSource` is not a Node global; the TON Connect bridge (SSE) needs it, so `WalletKitEngine.init()`
+  installs the `eventsource` polyfill on `globalThis`. Core wallet ops use `fetch` (present in Node 22).
 
 `spike/FINDINGS.md` records the verified WalletKit API (real export names, adapter shapes, reusable
 helpers like `parseUnits`/`formatUnits`/`isValidAddress`/`getJettonsFromClient`/`ApiClientToncenter`).
@@ -118,7 +119,7 @@ UI, go through a service. This compiler-enforces the seam; do not weaken it.
 ## Roadmap (milestones)
 
 M0 scaffold + spike ✅ → M1 keystore + create/import + balance + receive ✅ → M2 send TON (emulate/confirm) +
-history ✅ → M3 jettons ✅ → **M4 full Ink TUI = v1 ✅** → M5 TON Connect → M6 NFTs + npm packaging.
+history ✅ → M3 jettons ✅ → **M4 full Ink TUI = v1 ✅** → M5 TON Connect ✅ → M6 NFTs + npm packaging.
 The TUI launches on `tonsole` with no args (a real TTY); CLI subcommands otherwise. `src/tui/run.tsx` is a
 dynamic import so CLI commands don't load Ink.
 Default wallet contract is **W5 (v5r1)**; v4r2 is supported for import. Network defaults to **testnet** on

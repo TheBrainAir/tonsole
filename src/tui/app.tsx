@@ -4,6 +4,7 @@ import type { App } from '../composition.js';
 import type { StoredAccount } from '../services/AccountService.js';
 import { AppProvider, useApp } from './context.js';
 import { AccountsScreen } from './screens/AccountsScreen.js';
+import { ConnectScreen } from './screens/ConnectScreen.js';
 import { DashboardScreen } from './screens/DashboardScreen.js';
 import { HistoryScreen } from './screens/HistoryScreen.js';
 import { JettonsScreen } from './screens/JettonsScreen.js';
@@ -11,7 +12,14 @@ import { OnboardingScreen } from './screens/OnboardingScreen.js';
 import { ReceiveScreen } from './screens/ReceiveScreen.js';
 import { SendScreen } from './screens/SendScreen.js';
 
-export type Screen = 'dashboard' | 'send' | 'receive' | 'history' | 'jettons' | 'accounts';
+export type Screen =
+  | 'dashboard'
+  | 'send'
+  | 'receive'
+  | 'history'
+  | 'jettons'
+  | 'connect'
+  | 'accounts';
 
 export function TonsoleApp({ app }: { app: App }) {
   return (
@@ -65,6 +73,7 @@ function Main({ accounts }: { accounts: StoredAccount[] }) {
         {screen === 'receive' && <ReceiveScreen account={selected.account} />}
         {screen === 'history' && <HistoryScreen account={selected.account} />}
         {screen === 'jettons' && <JettonsScreen account={selected.account} />}
+        {screen === 'connect' && <ConnectScreen account={selected.account} />}
         {screen === 'accounts' && (
           <AccountsScreen
             accounts={accounts}

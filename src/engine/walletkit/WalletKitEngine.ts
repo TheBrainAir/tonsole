@@ -3,18 +3,20 @@ import { TonClient } from '@ton/ton';
 import { normalizeRecipient, parseAddress, sameAddress, toFriendly, toRaw } from '../../domain/address.js';
 import { generateMnemonic, validateMnemonic } from '../../domain/mnemonic.js';
 import { AppError } from '../errors.js';
-import type { CreateOpts, SigningContext, WalletEngine } from '../WalletEngine.js';
+import type { CreateOpts, SigningContext, TonConnect, WalletEngine } from '../WalletEngine.js';
 import type {
   AccountRef,
   Asset,
   AssetDelta,
   Balance,
+  ConnectRequest,
   HistoryItem,
   JettonBalance,
   NetworkId,
   Page,
   SendResult,
   SignedTransaction,
+  TonConnectSessionInfo,
   TransferIntent,
   TxPreview,
   UnsignedTransfer,
@@ -39,6 +41,36 @@ function extractErrorMessage(error: unknown): string {
     return String((error as { message?: unknown }).message ?? 'emulation error');
   }
   return 'Transaction emulation failed.';
+}
+
+/** Map a WalletKit emulated preview into our engine-agnostic TxPreview. */
+function mapEmulatedPreview(
+  preview: RawEmulatedPreview,
+  ourAddress: string,
+  decimalsFor: (jettonMaster: string) => number,
+): TxPreview {
+  const outgoing: AssetDelta[] = [];
+  const incoming: AssetDelta[] = [];
+  for (const item of preview.moneyFlow?.ourTransfers ?? []) {
+    const amount = BigInt(item.amount);
+    const isOut = item.fromAddress !== undefined && sameAddress(item.fromAddress, ourAddress);
+    const asset: Asset = item.tokenAddress
+      ? { jettonMaster: item.tokenAddress, decimals: decimalsFor(item.tokenAddress) }
+      : 'TON';
+    (isOut ? outgoing : incoming).push({
+      asset,
+      amount: isOut ? -amount : amount,
+      counterparty: isOut ? item.toAddress : item.fromAddress,
+    });
+  }
+  const ok = preview.error === undefined || preview.error === null;
+  return {
+    ok,
+    moneyFlow: { outgoing, incoming },
+    willDeployWallet: false,
+    warnings: ok ? [] : [extractErrorMessage(preview.error)],
+    raw: preview,
+  };
 }
 
 // @ton/walletkit ships a broken module build whose *named* exports Node cannot
@@ -72,6 +104,7 @@ export class WalletKitEngine implements WalletEngine {
   readonly #deps: WalletKitEngineDeps;
   #kit: WalletKitInstance | undefined;
   #client: TonClient | undefined;
+  #tcAccount: AccountRef | undefined;
 
   constructor(deps: WalletKitEngineDeps) {
     this.#deps = deps;
@@ -82,6 +115,11 @@ export class WalletKitEngine implements WalletEngine {
   }
 
   async init(): Promise<void> {
+    // The TON Connect bridge uses Server-Sent Events; Node has no global EventSource.
+    if (typeof (globalThis as Record<string, unknown>).EventSource === 'undefined') {
+      const { EventSource } = await import('eventsource');
+      (globalThis as Record<string, unknown>).EventSource = EventSource;
+    }
     const net = this.#wkNetwork(this.#deps.network);
     this.#kit = new wk.TonWalletKit({
       deviceInfo: wk.createDeviceInfo(),
@@ -241,33 +279,67 @@ export class WalletKitEngine implements WalletEngine {
   }
 
   #mapPreview(preview: RawEmulatedPreview, acct: AccountRef, intent: TransferIntent): TxPreview {
-    const outgoing: AssetDelta[] = [];
-    const incoming: AssetDelta[] = [];
-    for (const item of preview.moneyFlow?.ourTransfers ?? []) {
-      const amount = BigInt(item.amount);
-      const isOut = item.fromAddress !== undefined && sameAddress(item.fromAddress, acct.address);
-      const decimals =
-        intent.kind === 'jetton' &&
-        item.tokenAddress !== undefined &&
-        sameAddress(item.tokenAddress, intent.jettonMaster)
-          ? intent.decimals
-          : 9;
-      const asset: Asset = item.tokenAddress
-        ? { jettonMaster: item.tokenAddress, decimals }
-        : 'TON';
-      (isOut ? outgoing : incoming).push({
-        asset,
-        amount: isOut ? -amount : amount,
-        counterparty: isOut ? item.toAddress : item.fromAddress,
-      });
-    }
-    const ok = preview.error === undefined || preview.error === null;
+    return mapEmulatedPreview(preview, acct.address, (master) =>
+      intent.kind === 'jetton' && sameAddress(master, intent.jettonMaster) ? intent.decimals : 9,
+    );
+  }
+
+  tonConnect(): TonConnect {
+    const kit = this.#requireKit();
     return {
-      ok,
-      moneyFlow: { outgoing, incoming },
-      willDeployWallet: false,
-      warnings: ok ? [] : [extractErrorMessage(preview.error)],
-      raw: preview,
+      unlock: async (account, ctx) => {
+        await ctx.withMnemonic(async (mnemonic) => {
+          const net = this.#wkNetwork(account.network);
+          const client = kit.getApiClient(net);
+          const signer = await wk.Signer.fromMnemonic(mnemonic, { type: 'ton' });
+          const adapter =
+            account.version === 'v4r2'
+              ? await wk.WalletV4R2Adapter.create(signer, { client, network: net })
+              : await wk.WalletV5R1Adapter.create(signer, { client, network: net });
+          await kit.addWallet(adapter);
+        });
+        this.#tcAccount = account;
+      },
+      submitUrl: (url) => kit.handleTonConnectUrl(url),
+      onConnectRequest: (handler) => {
+        kit.onConnectRequest((event) => {
+          const req: ConnectRequest = {
+            id: event.id,
+            dappName: event.preview.dAppInfo?.name,
+            dappUrl: event.preview.dAppInfo?.url,
+            permissions: event.preview.permissions
+              .map((p) => p.title ?? p.name ?? '')
+              .filter((s) => s.length > 0),
+          };
+          void handler(req)
+            .then(async (ok) => {
+              if (ok) await kit.approveConnectRequest(event);
+              else await kit.rejectConnectRequest(event, 'Rejected by user');
+            })
+            .catch(() => undefined);
+        });
+      },
+      onTransactionRequest: (handler) => {
+        kit.onTransactionRequest((event) => {
+          const ourAddress = this.#tcAccount?.address ?? event.walletAddress ?? '';
+          const preview = mapEmulatedPreview(event.preview.data ?? {}, ourAddress, () => 9);
+          void handler({ id: event.id, preview })
+            .then(async (ok) => {
+              if (ok) await kit.approveTransactionRequest(event);
+              else await kit.rejectTransactionRequest(event, 'Rejected by user');
+            })
+            .catch(() => undefined);
+        });
+      },
+      onDisconnect: (handler) => kit.onDisconnect(() => handler()),
+      listSessions: async () => {
+        const sessions = await kit.listSessions();
+        return sessions.map((s): TonConnectSessionInfo => {
+          const sess = s as unknown as { id?: string; name?: string; url?: string; manifestUrl?: string };
+          return { id: String(sess.id ?? ''), name: sess.name, url: sess.url ?? sess.manifestUrl };
+        });
+      },
+      disconnect: (sessionId) => kit.disconnect(sessionId),
     };
   }
 
