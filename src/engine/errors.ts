@@ -17,6 +17,7 @@ export type AppErrorCode =
   | 'WrongPassphrase'
   | 'EngineUnsupported'
   | 'BridgeError'
+  | 'Cancelled'
   | 'Unknown';
 
 export interface AppErrorOptions {
@@ -55,6 +56,7 @@ export const EXIT_CODES: Record<AppErrorCode, number> = {
   RateLimited: 8,
   EngineUnsupported: 9,
   BridgeError: 10,
+  Cancelled: 0,
 };
 
 export function exitCodeFor(e: unknown): number {

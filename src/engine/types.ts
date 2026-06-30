@@ -97,12 +97,13 @@ export interface FeeBreakdown {
   total: bigint;
 }
 
-/** Result of emulating a transfer before any passphrase prompt or signing. */
+/** Result of emulating a transfer before broadcasting. */
 export interface TxPreview {
   /** True if emulation succeeded (compute phase did not abort). */
   ok: boolean;
   moneyFlow: MoneyFlow;
-  estimatedFees: FeeBreakdown;
+  /** Itemized fees when the provider exposes them; otherwise omitted. */
+  estimatedFees?: FeeBreakdown;
   /** Whether sending also deploys the sender's wallet contract (first outgoing tx). */
   willDeployWallet: boolean;
   /** Human-readable cautions, e.g. "recipient is uninitialized; using non-bounceable". */

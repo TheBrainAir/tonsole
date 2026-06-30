@@ -1,11 +1,13 @@
 import { Address } from '@ton/core';
 import { TonClient } from '@ton/ton';
-import { parseAddress, toFriendly, toRaw } from '../../domain/address.js';
+import { normalizeRecipient, parseAddress, sameAddress, toFriendly, toRaw } from '../../domain/address.js';
 import { generateMnemonic, validateMnemonic } from '../../domain/mnemonic.js';
 import { AppError } from '../errors.js';
-import type { CreateOpts, WalletEngine } from '../WalletEngine.js';
+import type { CreateOpts, SigningContext, WalletEngine } from '../WalletEngine.js';
 import type {
   AccountRef,
+  Asset,
+  AssetDelta,
   Balance,
   HistoryItem,
   JettonBalance,
@@ -13,9 +15,31 @@ import type {
   Page,
   SendResult,
   SignedTransaction,
+  TransferIntent,
   TxPreview,
   UnsignedTransfer,
 } from '../types.js';
+
+/** Structural subset of WalletKit's TransactionEmulatedPreview that we consume. */
+interface RawEmulatedPreview {
+  result?: unknown;
+  error?: unknown;
+  moneyFlow?: {
+    ourTransfers?: Array<{
+      amount: string;
+      fromAddress?: string;
+      toAddress?: string;
+      tokenAddress?: string;
+    }>;
+  };
+}
+
+function extractErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? 'emulation error');
+  }
+  return 'Transaction emulation failed.';
+}
 
 // @ton/walletkit ships a broken module build whose *named* exports Node cannot
 // statically bind and whose internal relative imports raw Node cannot resolve. A
@@ -140,6 +164,88 @@ export class WalletKitEngine implements WalletEngine {
 
   async send(): Promise<SendResult> {
     throw laterMilestone('Sending');
+  }
+
+  /**
+   * Full TON-transfer saga. WalletKit needs the signer-backed wallet throughout, so
+   * the order is: fast-fail on balance -> unlock key -> build -> emulate -> `onPreview`
+   * confirmation -> broadcast. Nothing is sent until `onPreview` returns true.
+   */
+  async transfer(
+    acct: AccountRef,
+    intent: TransferIntent,
+    ctx: SigningContext,
+    onPreview?: (preview: TxPreview) => Promise<boolean>,
+  ): Promise<SendResult> {
+    if (intent.kind !== 'ton') throw laterMilestone('Jetton and NFT transfers');
+
+    const { nano } = await this.getBalance(acct);
+    if (nano < intent.amount) {
+      throw new AppError(
+        'InsufficientBalance',
+        `Balance is ${nano} nanotons but ${intent.amount} was requested.`,
+        { details: { balance: nano.toString(), amount: intent.amount.toString() } },
+      );
+    }
+
+    return ctx.withMnemonic(async (mnemonic): Promise<SendResult> => {
+      const wallet = await this.#walletFor(mnemonic, acct);
+      const request = await wallet.createTransferTonTransaction({
+        recipientAddress: normalizeRecipient(intent.to, acct.network),
+        transferAmount: intent.amount.toString(),
+        ...(intent.comment === undefined ? {} : { comment: intent.comment }),
+      });
+
+      const preview = this.#mapPreview(await wallet.getTransactionPreview(request), acct);
+      if (!preview.ok) {
+        throw new AppError('EmulationFailed', preview.warnings[0] ?? 'Transaction emulation failed.', {
+          details: { warnings: preview.warnings },
+        });
+      }
+      if (onPreview && !(await onPreview(preview))) {
+        throw new AppError('Cancelled', 'Transfer cancelled.');
+      }
+
+      const sent = await wallet.sendTransaction(request);
+      return { hash: sent.normalizedHash, status: 'submitted' };
+    });
+  }
+
+  async #walletFor(mnemonic: string[], acct: AccountRef) {
+    const kit = this.#requireKit();
+    const net = this.#wkNetwork(acct.network);
+    const client = kit.getApiClient(net);
+    const signer = await wk.Signer.fromMnemonic(mnemonic, { type: 'ton' });
+    const adapter =
+      acct.version === 'v4r2'
+        ? await wk.WalletV4R2Adapter.create(signer, { client, network: net })
+        : await wk.WalletV5R1Adapter.create(signer, { client, network: net });
+    const wallet = await kit.addWallet(adapter);
+    if (!wallet) throw new AppError('Unknown', 'Failed to initialize the wallet for signing.');
+    return wallet;
+  }
+
+  #mapPreview(preview: RawEmulatedPreview, acct: AccountRef): TxPreview {
+    const outgoing: AssetDelta[] = [];
+    const incoming: AssetDelta[] = [];
+    for (const item of preview.moneyFlow?.ourTransfers ?? []) {
+      const amount = BigInt(item.amount);
+      const isOut = item.fromAddress !== undefined && sameAddress(item.fromAddress, acct.address);
+      const asset: Asset = item.tokenAddress ? { jettonMaster: item.tokenAddress, decimals: 9 } : 'TON';
+      (isOut ? outgoing : incoming).push({
+        asset,
+        amount: isOut ? -amount : amount,
+        counterparty: isOut ? item.toAddress : item.fromAddress,
+      });
+    }
+    const ok = preview.error === undefined || preview.error === null;
+    return {
+      ok,
+      moneyFlow: { outgoing, incoming },
+      willDeployWallet: false,
+      warnings: ok ? [] : [extractErrorMessage(preview.error)],
+      raw: preview,
+    };
   }
 
   #requireKit(): WalletKitInstance {

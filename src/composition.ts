@@ -3,9 +3,12 @@ import type { Config } from './config/schema.js';
 import type { WalletEngine } from './engine/WalletEngine.js';
 import type { NetworkId } from './engine/types.js';
 import { createEngine } from './engine/factory.js';
+import { TonApiClient } from './network/tonapi/TonApiClient.js';
 import { AccountService } from './services/AccountService.js';
 import { BalanceService } from './services/BalanceService.js';
+import { HistoryService } from './services/HistoryService.js';
 import { ReceiveService } from './services/ReceiveService.js';
+import { TransferService } from './services/TransferService.js';
 
 export interface App {
   config: Config;
@@ -13,6 +16,8 @@ export interface App {
   accounts: AccountService;
   balances: BalanceService;
   receive: ReceiveService;
+  transfers: TransferService;
+  history: HistoryService;
   dispose(): Promise<void>;
 }
 
@@ -39,12 +44,16 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<App> {
     logger: { warn: (message) => process.stderr.write(`tonsole: ${message}\n`) },
   });
 
+  const accounts = new AccountService(engine, config);
+  const indexer = new TonApiClient(api.tonapiUrl, api.tonapiKey);
   return {
     config,
     engine,
-    accounts: new AccountService(engine, config),
+    accounts,
     balances: new BalanceService(engine),
     receive: new ReceiveService(config),
+    transfers: new TransferService(engine, accounts),
+    history: new HistoryService(indexer),
     dispose: () => engine.dispose(),
   };
 }
