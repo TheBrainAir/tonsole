@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { App } from '../composition.js';
 import type { StoredAccount } from '../services/AccountService.js';
 import { TonsoleApp } from './app.js';
+import { AppProvider } from './context.js';
+import { ConnectScreen } from './screens/ConnectScreen.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -49,6 +51,7 @@ describe('TUI', () => {
     expect(frame).toContain('0 GRAM');
     expect(frame).toContain('Send');
     expect(frame).toContain('Receive');
+    expect(frame).toContain('Connect');
     unmount();
   });
 
@@ -62,6 +65,18 @@ describe('TUI', () => {
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Send GRAM');
     expect(frame).toContain('Comment');
+    unmount();
+  });
+
+  it('TON Connect screen shows the unlock prompt', () => {
+    const { lastFrame, unmount } = render(
+      <AppProvider value={fakeApp({ accountsList: [account] })}>
+        <ConnectScreen account={account.account} />
+      </AppProvider>,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('TON Connect');
+    expect(frame).toContain('Passphrase');
     unmount();
   });
 });

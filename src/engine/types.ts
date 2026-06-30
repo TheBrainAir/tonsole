@@ -148,3 +148,24 @@ export interface Page<T> {
   items: T[];
   nextCursor?: string;
 }
+
+/** A dApp connection request (TON Connect), surfaced for approval. */
+export interface ConnectRequest {
+  id: string;
+  dappName?: string;
+  dappUrl?: string;
+  permissions: string[];
+}
+
+/** A dApp transaction request with its emulated preview. */
+export interface ConnectTxRequest {
+  id: string;
+  preview: TxPreview;
+}
+
+/** An active TON Connect session. */
+export interface TonConnectSessionInfo {
+  id: string;
+  name?: string;
+  url?: string;
+}

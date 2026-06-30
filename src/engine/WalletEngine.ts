@@ -1,17 +1,37 @@
 import type {
   AccountRef,
   Balance,
+  ConnectRequest,
+  ConnectTxRequest,
   HistoryItem,
   JettonBalance,
   NetworkId,
   Page,
   SendResult,
   SignedTransaction,
+  TonConnectSessionInfo,
   TransferIntent,
   TxPreview,
   UnsignedTransfer,
   WalletVersion,
 } from './types.js';
+
+/**
+ * TON Connect capability (WalletKit-only). The wallet is unlocked once for the
+ * session; each dApp request is still surfaced to the user via a handler that
+ * returns the approve/reject decision.
+ */
+export interface TonConnect {
+  /** Derive + register the wallet so the session can sign dApp requests. */
+  unlock(account: AccountRef, ctx: SigningContext): Promise<void>;
+  /** Start a connection from a pasted tc:// / universal link. */
+  submitUrl(url: string): Promise<void>;
+  onConnectRequest(handler: (req: ConnectRequest) => Promise<boolean>): void;
+  onTransactionRequest(handler: (req: ConnectTxRequest) => Promise<boolean>): void;
+  onDisconnect(handler: () => void): void;
+  listSessions(): Promise<TonConnectSessionInfo[]>;
+  disconnect(sessionId?: string): Promise<void>;
+}
 
 /**
  * Supplies signing material to the engine transiently, for the lifetime of one
@@ -80,4 +100,7 @@ export interface WalletEngine {
     ctx: SigningContext,
     onPreview?: (preview: TxPreview) => Promise<boolean>,
   ): Promise<SendResult>;
+
+  /** TON Connect support, if the engine provides it (WalletKit does; the fallback doesn't). */
+  tonConnect?(): TonConnect;
 }
