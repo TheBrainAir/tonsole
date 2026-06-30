@@ -51,4 +51,17 @@ describe('TUI', () => {
     expect(frame).toContain('Receive');
     unmount();
   });
+
+  it('exposes a comment/memo field on the send screen', async () => {
+    const { lastFrame, stdin, unmount } = render(
+      <TonsoleApp app={fakeApp({ accountsList: [account] })} />,
+    );
+    await delay(50);
+    stdin.write('\r'); // select the first menu item ("Send")
+    await delay(50);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Send GRAM');
+    expect(frame).toContain('Comment');
+    unmount();
+  });
 });
