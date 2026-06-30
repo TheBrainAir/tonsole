@@ -4,12 +4,14 @@ import { NETWORKS } from '../../config/networks.js';
 import type { AccountRef, NetworkId, NftItem } from '../../engine/types.js';
 import { renderImagePreview } from '../../shared/image.js';
 import { copyToClipboard, openUrl } from '../../shared/system.js';
+import { GalleryRow, THUMB_H, THUMB_W } from '../components/GalleryRow.js';
 import { Loading } from '../components/ui.js';
 import { useApp } from '../context.js';
 import { useAsync } from '../hooks/useAsync.js';
+import { useImagePreviews } from '../hooks/useImagePreviews.js';
 import type { SendPreset } from './SendScreen.js';
 
-const WINDOW = 5;
+const WINDOW = 4;
 const IMG_W = 20;
 const IMG_H = 10;
 
@@ -30,9 +32,17 @@ export function NftScreen({
 
   const sel = items.length > 0 ? Math.min(selected, items.length - 1) : 0;
   const current = items[sel];
+  const start = Math.min(Math.max(0, sel - Math.floor(WINDOW / 2)), Math.max(0, items.length - WINDOW));
+  const visible = items.slice(start, start + WINDOW);
+
   const preview = useAsync(
     () => (current?.image ? renderImagePreview(current.image, { width: IMG_W, height: IMG_H }) : Promise.resolve(null)),
     [current?.image],
+  );
+  const getThumb = useImagePreviews(
+    visible.map((n) => n.image),
+    THUMB_W,
+    THUMB_H,
   );
 
   useInput(
@@ -91,9 +101,6 @@ export function NftScreen({
     );
   }
 
-  const start = Math.min(Math.max(0, sel - Math.floor(WINDOW / 2)), Math.max(0, items.length - WINDOW));
-  const visible = items.slice(start, start + WINDOW);
-
   return (
     <Box flexDirection="column">
       <Text bold>
@@ -103,10 +110,14 @@ export function NftScreen({
         </Text>
       </Text>
       {start > 0 ? <Text dimColor>{`  ↑ ${start} more`}</Text> : null}
-      {visible.map((nft, i) => (
-        <Text key={start + i} color={start + i === sel ? 'cyan' : undefined}>
-          {`${start + i === sel ? '❯' : ' '} ${nft.name ?? '(unnamed)'}${nft.verified ? ' ✓' : ''}`}
-        </Text>
+      {visible.map((nft, idx) => (
+        <GalleryRow
+          key={start + idx}
+          thumb={getThumb(nft.image)}
+          selected={start + idx === sel}
+          title={`${nft.name ?? '(unnamed)'}${nft.verified ? ' ✓' : ''}`}
+          subtitle={nft.collectionName}
+        />
       ))}
       {start + WINDOW < items.length ? (
         <Text dimColor>{`  ↓ ${items.length - start - WINDOW} more`}</Text>

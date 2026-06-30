@@ -23,10 +23,7 @@ export async function renderImagePreview(
   const cols = opts.width ?? 20;
   const pixelRows = (opts.height ?? 10) * 2;
   try {
-    const fetchUrl = url.startsWith('ipfs://')
-      ? `https://ipfs.io/ipfs/${url.slice('ipfs://'.length)}`
-      : url;
-    const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(8000) });
+    const res = await fetch(toFetchUrl(url), { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return null;
     const image = await Jimp.fromBuffer(Buffer.from(await res.arrayBuffer()));
     image.resize({ w: cols, h: pixelRows });
@@ -45,6 +42,26 @@ export async function renderImagePreview(
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolve a metadata image URL to something fetchable & jimp-decodable:
+ * - ipfs:// → public gateway
+ * - tonapi imgproxy URLs serve WebP (jimp can't read it); recover the original
+ *   image (usually PNG/JPG) from the trailing base64url-encoded source segment.
+ */
+function toFetchUrl(url: string): string {
+  let u = url;
+  if (u.includes('/imgproxy/')) {
+    const b64 = (u.split('/').pop() ?? '').replace(/\.\w+$/, '');
+    try {
+      const decoded = Buffer.from(b64, 'base64url').toString('utf8');
+      if (/^(https?:|ipfs:)/.test(decoded)) u = decoded;
+    } catch {
+      // fall back to the original url
+    }
+  }
+  return u.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${u.slice('ipfs://'.length)}` : u;
 }
 
 /** Flatten a possibly-transparent pixel over black (matches dark terminals). */
