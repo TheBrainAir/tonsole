@@ -94,6 +94,10 @@ export interface AssetDelta {
   /** Signed raw amount: negative = leaving us, positive = arriving. */
   amount: bigint;
   counterparty?: string;
+  /** Human-readable counterparty name (e.g. a .ton domain) from the emulation, if any. */
+  counterpartyName?: string;
+  /** Asset class for display — distinguishes an NFT from a fungible jetton. */
+  assetType?: 'ton' | 'jetton' | 'nft';
 }
 
 /** Net asset movement produced by emulation; drives the confirmation screen. */

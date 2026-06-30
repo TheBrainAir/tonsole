@@ -24,17 +24,53 @@ import type {
 import { normalizeStoredEvent } from './tonconnect-normalize.js';
 
 /** Structural subset of WalletKit's TransactionEmulatedPreview that we consume. */
+interface RawTransfer {
+  amount: string;
+  fromAddress?: string;
+  toAddress?: string;
+  tokenAddress?: string;
+  assetType?: string; // 'ton' | 'jetton' | 'nft'
+}
+interface RawTraceTx {
+  totalFees?: string;
+  description?: { computePhase?: { exitCode?: number } };
+}
+interface RawAddressBookEntry {
+  address?: string;
+  domain?: string;
+}
 interface RawEmulatedPreview {
-  result?: unknown;
+  result?: unknown; // 'success' | 'failure'
   error?: unknown;
-  moneyFlow?: {
-    ourTransfers?: Array<{
-      amount: string;
-      fromAddress?: string;
-      toAddress?: string;
-      tokenAddress?: string;
-    }>;
+  moneyFlow?: { ourTransfers?: RawTransfer[]; ourAddress?: string };
+  trace?: {
+    transactions?: Record<string, RawTraceTx>;
+    addressBook?: Record<string, RawAddressBookEntry>;
   };
+}
+
+function assetTypeOf(item: RawTransfer): 'ton' | 'jetton' | 'nft' {
+  if (item.assetType === 'nft') return 'nft';
+  if (item.assetType === 'jetton' || item.tokenAddress) return 'jetton';
+  return 'ton';
+}
+
+/** Find a counterparty's human-readable .ton domain in the emulation address book. */
+function lookupName(
+  counterparty: string | undefined,
+  book?: Record<string, RawAddressBookEntry>,
+): string | undefined {
+  if (!counterparty || !book) return undefined;
+  for (const [key, entry] of Object.entries(book)) {
+    try {
+      if (sameAddress(key, counterparty) || (entry.address && sameAddress(entry.address, counterparty))) {
+        return entry.domain || undefined;
+      }
+    } catch {
+      // non-address key; skip
+    }
+  }
+  return undefined;
 }
 
 function extractErrorMessage(error: unknown): string {
@@ -55,26 +91,49 @@ function mapEmulatedPreview(
   ourAddress: string,
   decimalsFor: (jettonMaster: string) => number,
 ): TxPreview {
+  const book = preview.trace?.addressBook;
   const outgoing: AssetDelta[] = [];
   const incoming: AssetDelta[] = [];
   for (const item of preview.moneyFlow?.ourTransfers ?? []) {
     const amount = BigInt(item.amount);
     const isOut = item.fromAddress !== undefined && sameAddress(item.fromAddress, ourAddress);
-    const asset: Asset = item.tokenAddress
-      ? { jettonMaster: item.tokenAddress, decimals: decimalsFor(item.tokenAddress) }
-      : 'TON';
+    const type = assetTypeOf(item);
+    const asset: Asset =
+      type === 'ton'
+        ? 'TON'
+        : { jettonMaster: item.tokenAddress ?? '', decimals: type === 'nft' ? 0 : decimalsFor(item.tokenAddress ?? '') };
+    const counterparty = isOut ? item.toAddress : item.fromAddress;
     (isOut ? outgoing : incoming).push({
       asset,
       amount: isOut ? -amount : amount,
-      counterparty: isOut ? item.toAddress : item.fromAddress,
+      counterparty,
+      counterpartyName: lookupName(counterparty, book),
+      assetType: type,
     });
   }
-  const ok = preview.error === undefined || preview.error === null;
+
+  let feeTotal = 0n;
+  let exitCode: number | undefined;
+  for (const tx of Object.values(preview.trace?.transactions ?? {})) {
+    if (tx.totalFees) {
+      try {
+        feeTotal += BigInt(tx.totalFees);
+      } catch {
+        // ignore unparseable fee
+      }
+    }
+    const ec = tx.description?.computePhase?.exitCode;
+    if (exitCode === undefined && typeof ec === 'number' && ec !== 0) exitCode = ec;
+  }
+
+  const failed = preview.result === 'failure' || (preview.error !== undefined && preview.error !== null);
   return {
-    ok,
+    ok: !failed,
     moneyFlow: { outgoing, incoming },
+    estimatedFees: feeTotal > 0n ? { gas: 0n, forward: 0n, storage: 0n, total: feeTotal } : undefined,
     willDeployWallet: false,
-    warnings: ok ? [] : [extractErrorMessage(preview.error)],
+    warnings: failed ? [extractErrorMessage(preview.error)] : [],
+    exitCode,
     raw: preview,
   };
 }

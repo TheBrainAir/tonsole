@@ -4,6 +4,7 @@ import type { App } from '../composition.js';
 import type { StoredAccount } from '../services/AccountService.js';
 import type { HistoryItem } from '../engine/types.js';
 import { TonsoleApp } from './app.js';
+import { TxSummary } from './components/TxSummary.js';
 import { AppProvider } from './context.js';
 import { ConnectScreen } from './screens/ConnectScreen.js';
 import { HistoryScreen } from './screens/HistoryScreen.js';
@@ -157,6 +158,38 @@ describe('TUI', () => {
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Send USDT');
     expect(frame).toContain('Amount');
+    unmount();
+  });
+
+  it('transaction summary explains, in plain language, what signing does', () => {
+    const preview = {
+      ok: true,
+      moneyFlow: {
+        outgoing: [
+          { asset: 'TON' as const, amount: -250_000_000n, counterparty: 'EQdest', assetType: 'ton' as const },
+          {
+            asset: { jettonMaster: 'EQnft', decimals: 0 },
+            amount: -1n,
+            counterparty: 'EQbob',
+            counterpartyName: 'bob.ton',
+            assetType: 'nft' as const,
+          },
+        ],
+        incoming: [],
+      },
+      estimatedFees: { gas: 0n, forward: 0n, storage: 0n, total: 6_100_000n },
+      willDeployWallet: false,
+      warnings: ['recipient is uninitialized'],
+      raw: {},
+    };
+    const { lastFrame, unmount } = render(<TxSummary preview={preview} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('If you sign');
+    expect(frame).toContain('you send');
+    expect(frame).toContain('an NFT'); // NFT labeled, not a tiny jetton amount
+    expect(frame).toContain('bob.ton'); // human-readable counterparty name
+    expect(frame).toContain('network fee');
+    expect(frame).toContain('recipient is uninitialized');
     unmount();
   });
 });

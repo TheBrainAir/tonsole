@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { buildApp } from '../../composition.js';
-import { formatAmount, formatCoin, parseTon } from '../../domain/amount.js';
+import { formatAmount, formatCoin, formatTon, parseTon } from '../../domain/amount.js';
 import { AppError } from '../../engine/errors.js';
 import type { AssetDelta, TxPreview } from '../../engine/types.js';
 import { promptPassphrase, readLine } from '../../secrets/passphrase.js';
@@ -112,23 +112,40 @@ function makeConfirm(json: boolean, yes: boolean): (preview: TxPreview) => Promi
 }
 
 function deltaText(d: AssetDelta): string {
+  if (d.assetType === 'nft') return 'an NFT';
   const abs = d.amount < 0n ? -d.amount : d.amount;
   if (d.asset === 'TON') return formatCoin(abs);
-  return `${formatAmount(abs, d.asset.decimals)} ${d.asset.symbol ?? 'jetton'}`;
+  return `${formatAmount(abs, d.asset.decimals)} ${d.asset.symbol ?? 'tokens'}`;
+}
+
+function who(d: AssetDelta): string {
+  return d.counterpartyName ?? d.counterparty ?? '?';
 }
 
 function renderPreview(preview: TxPreview): void {
   info();
-  info(chalk.bold('Transaction preview (emulated)'));
+  info(
+    preview.ok
+      ? chalk.green.bold('✓ If you sign, this happens:')
+      : chalk.red.bold('✗ This would FAIL — nothing will be sent'),
+  );
   for (const d of preview.moneyFlow.outgoing) {
-    info(`  ${chalk.red('−')} ${deltaText(d)}  → ${chalk.dim(d.counterparty ?? '?')}`);
+    info(`  ${chalk.red('−')} ${deltaText(d)}  → ${chalk.dim(who(d))}`);
   }
   for (const d of preview.moneyFlow.incoming) {
-    info(`  ${chalk.green('+')} ${deltaText(d)}  ${chalk.dim(`from ${d.counterparty ?? '?'}`)}`);
+    info(`  ${chalk.green('+')} ${deltaText(d)}  ${chalk.dim(`from ${who(d)}`)}`);
   }
   if (preview.moneyFlow.outgoing.length === 0 && preview.moneyFlow.incoming.length === 0) {
-    info(chalk.dim('  (emulation reported no net asset movement)'));
+    info(chalk.dim('  (no net asset movement — likely a contract call)'));
   }
-  info(chalk.dim('  plus network gas fees'));
+  const fee = preview.estimatedFees?.total;
+  info(chalk.dim(`  network fee ${fee !== undefined ? `≈ ${formatTon(fee)} GRAM` : '— a few mGRAM'}`));
+  const tonOut = preview.moneyFlow.outgoing
+    .filter((d) => d.asset === 'TON')
+    .reduce((s, d) => s + (d.amount < 0n ? -d.amount : d.amount), 0n);
+  if (tonOut > 0n && fee !== undefined) {
+    info(chalk.dim(`  total leaving ≈ ${formatTon(tonOut + fee)} GRAM`));
+  }
+  for (const w of preview.warnings) info(chalk.yellow(`  ⚠ ${w}`));
   info();
 }
