@@ -73,6 +73,7 @@ function Main({ accounts }: { accounts: StoredAccount[] }) {
   const tcRef = useRef<TonConnect | null>(null);
   const [unlocked, setUnlocked] = useState(false);
   const [tcStatus, setTcStatus] = useState('');
+  const [tcError, setTcError] = useState<string | null>(null);
   const [pendingConnect, setPendingConnect] = useState<ConnectRequest | null>(null);
   const [pendingTx, setPendingTx] = useState<ConnectTxRequest | null>(null);
   const connectResolver = useRef<((ok: boolean) => void) | null>(null);
@@ -105,7 +106,10 @@ function Main({ accounts }: { accounts: StoredAccount[] }) {
             txResolver.current = resolve;
           }),
       );
-      handle.onError((message) => setTcStatus(`Error: ${message}`));
+      handle.onError((message) => {
+        setTcStatus(`Error: ${message}`);
+        setTcError(message);
+      });
       handle.onDisconnect(() => setTcStatus('the dApp disconnected'));
       tcRef.current = handle;
       setUnlocked(true);
@@ -140,6 +144,7 @@ function Main({ accounts }: { accounts: StoredAccount[] }) {
   const pending = pendingConnect !== null || pendingTx !== null;
 
   useInput((input, key) => {
+    if (tcError) setTcError(null); // any key dismisses the error banner, then acts normally
     if (pendingConnect) {
       if (input === 'y') resolveConnect(true);
       else if (input === 'n' || key.escape) resolveConnect(false);
@@ -158,6 +163,12 @@ function Main({ accounts }: { accounts: StoredAccount[] }) {
     <TonConnectProvider value={controller}>
       <Box flexDirection="column" paddingX={1}>
         <Header account={selected} connected={unlocked} />
+        {tcError ? (
+          <Box marginTop={1}>
+            <Text color="red">⚠ dApp request rejected: {tcError} </Text>
+            <Text dimColor>(any key dismisses)</Text>
+          </Box>
+        ) : null}
         <Box marginTop={1} flexDirection="column">
           {pendingConnect ? (
             <ConnectPrompt req={pendingConnect} />
