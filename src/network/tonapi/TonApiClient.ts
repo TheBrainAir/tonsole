@@ -6,7 +6,14 @@ import type { HistoryQuery, IndexerPort } from '../IndexerPort.js';
 interface TonApiJettonBalance {
   balance?: string;
   wallet_address?: { address?: string };
-  jetton?: { address?: string; name?: string; symbol?: string; decimals?: number; verification?: string };
+  jetton?: {
+    address?: string;
+    name?: string;
+    symbol?: string;
+    decimals?: number;
+    verification?: string;
+    image?: string;
+  };
 }
 interface TonApiJettonsResponse {
   balances?: TonApiJettonBalance[];
@@ -93,6 +100,7 @@ export class TonApiClient implements IndexerPort {
         decimals: b.jetton?.decimals ?? 9,
         symbol: b.jetton?.symbol,
         name: b.jetton?.name,
+        image: b.jetton?.image,
         verified: b.jetton?.verification === 'whitelist',
       }))
       .filter((j) => j.master !== '');
