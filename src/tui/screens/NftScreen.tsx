@@ -9,7 +9,9 @@ import { useApp } from '../context.js';
 import { useAsync } from '../hooks/useAsync.js';
 import type { SendPreset } from './SendScreen.js';
 
-const WINDOW = 6;
+const WINDOW = 5;
+const IMG_W = 20;
+const IMG_H = 10;
 
 const toHttp = (u: string) => (u.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${u.slice(7)}` : u);
 
@@ -29,7 +31,7 @@ export function NftScreen({
   const sel = items.length > 0 ? Math.min(selected, items.length - 1) : 0;
   const current = items[sel];
   const preview = useAsync(
-    () => (current?.image ? renderImagePreview(current.image, { width: 30, height: 14 }) : Promise.resolve(null)),
+    () => (current?.image ? renderImagePreview(current.image, { width: IMG_W, height: IMG_H }) : Promise.resolve(null)),
     [current?.image],
   );
 
@@ -111,16 +113,18 @@ export function NftScreen({
       ) : null}
 
       <Box marginTop={1} borderStyle="round" borderColor="gray" paddingX={1}>
-        <Box flexDirection="column" marginRight={2}>
+        <Box width={IMG_W} minHeight={IMG_H} flexShrink={0} flexDirection="column">
           {preview.loading ? (
-            <Text dimColor>rendering preview…</Text>
+            <Text dimColor>rendering…</Text>
           ) : preview.data ? (
             <Text>{preview.data}</Text>
           ) : (
-            <Text dimColor>{current.image ? '(preview unavailable — press i)' : '(no image)'}</Text>
+            <Text dimColor>{current.image ? '(no preview — press i)' : '(no image)'}</Text>
           )}
         </Box>
-        <NftMeta nft={current} network={account.network} />
+        <Box marginLeft={2} flexDirection="column">
+          <NftMeta nft={current} network={account.network} />
+        </Box>
       </Box>
 
       {status ? <Text color="green">{status}</Text> : null}
