@@ -10,9 +10,9 @@ scriptable **Commander CLI** commands. **ESM-only, Node ≥ 22.12, React 19** (f
 
 Status: the **v1 core is functional — milestones M0–M4 are complete**: encrypted keystore + create/import,
 balances (GRAM + jettons), send (GRAM + jettons) with an emulation preview + confirmation, receive + QR,
-transaction history, a full interactive **Ink TUI** (`src/tui/`) plus the scriptable CLI, and **TON
-Connect** (approve dApp connections/transactions from the terminal). M6 (NFTs + packaging) remains. See
-the roadmap below.
+transaction history, a full interactive **Ink TUI** (`src/tui/`) plus the scriptable CLI, **TON Connect**
+(approve dApp connections/transactions from the terminal), and **NFTs** (view + transfer). The v1 feature
+set is complete; remaining work is polish and the npm publish. See the roadmap below.
 
 ## Commands
 
@@ -121,7 +121,8 @@ UI, go through a service. This compiler-enforces the seam; do not weaken it.
 ## Roadmap (milestones)
 
 M0 scaffold + spike ✅ → M1 keystore + create/import + balance + receive ✅ → M2 send TON (emulate/confirm) +
-history ✅ → M3 jettons ✅ → **M4 full Ink TUI = v1 ✅** → M5 TON Connect ✅ → M6 NFTs + npm packaging.
+history ✅ → M3 jettons ✅ → **M4 full Ink TUI = v1 ✅** → M5 TON Connect ✅ → M6 NFTs ✅ (view + transfer).
+The `tonsole` bin + tsup bundle are publishable (`npm i -g tonsole`); the actual npm publish is the user's call.
 The TUI launches on `tonsole` with no args (a real TTY); CLI subcommands otherwise. `src/tui/run.tsx` is a
 dynamic import so CLI commands don't load Ink.
 Default wallet contract is **W5 (v5r1)**; v4r2 is supported for import. Network defaults to **testnet** on

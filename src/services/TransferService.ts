@@ -30,6 +30,11 @@ export interface SendJettonParams extends BaseSendParams {
   amount: string;
 }
 
+export interface SendNftParams extends BaseSendParams {
+  /** NFT item contract address. */
+  nftAddress: string;
+}
+
 export interface SentResult extends SendResult {
   explorerUrl?: string;
 }
@@ -72,6 +77,24 @@ export class TransferService {
     const result = await this.#transfer()(
       stored.account,
       { kind: 'jetton', jettonMaster: held.master, to: params.to, amount, decimals: held.decimals, comment: params.comment },
+      ctx,
+      params.confirm,
+    );
+    return this.#withExplorer(result, stored.account.network);
+  }
+
+  async sendNft(params: SendNftParams): Promise<SentResult> {
+    const stored = this.accounts.resolve(params.from);
+    const owned = (await this.indexer.getNfts(stored.account)).some((n) =>
+      sameAddress(n.address, params.nftAddress),
+    );
+    if (!owned) {
+      throw new AppError('InvalidAddress', `This wallet does not own NFT ${params.nftAddress}.`);
+    }
+    const ctx = this.accounts.signingContext(stored, params.passphrase);
+    const result = await this.#transfer()(
+      stored.account,
+      { kind: 'nft', nftAddress: params.nftAddress, to: params.to, comment: params.comment },
       ctx,
       params.confirm,
     );

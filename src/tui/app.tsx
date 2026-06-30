@@ -13,6 +13,7 @@ import { ConnectScreen } from './screens/ConnectScreen.js';
 import { DashboardScreen } from './screens/DashboardScreen.js';
 import { HistoryScreen } from './screens/HistoryScreen.js';
 import { JettonsScreen } from './screens/JettonsScreen.js';
+import { NftScreen } from './screens/NftScreen.js';
 import { OnboardingScreen } from './screens/OnboardingScreen.js';
 import { ReceiveScreen } from './screens/ReceiveScreen.js';
 import { SendScreen } from './screens/SendScreen.js';
@@ -24,6 +25,7 @@ export type Screen =
   | 'receive'
   | 'history'
   | 'jettons'
+  | 'nft'
   | 'connect'
   | 'accounts';
 
@@ -202,6 +204,8 @@ function CurrentScreen({
       return <HistoryScreen account={account.account} />;
     case 'jettons':
       return <JettonsScreen account={account.account} />;
+    case 'nft':
+      return <NftScreen account={account.account} />;
     case 'connect':
       return <ConnectScreen account={account.account} />;
     case 'accounts':

@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { registerBalanceCommand } from './commands/balance.js';
 import { registerHistoryCommand } from './commands/history.js';
 import { registerJettonsCommand } from './commands/jettons.js';
+import { registerNftCommand } from './commands/nft.js';
 import { registerReceiveCommand } from './commands/receive.js';
 import { registerSendCommand } from './commands/send.js';
 import { registerWalletCommands } from './commands/wallet.js';
@@ -21,6 +22,7 @@ export function buildProgram(): Command {
   registerSendCommand(program);
   registerReceiveCommand(program);
   registerJettonsCommand(program);
+  registerNftCommand(program);
   registerHistoryCommand(program);
 
   return program;

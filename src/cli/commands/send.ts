@@ -12,44 +12,62 @@ interface SendOpts {
   comment?: string;
   from?: string;
   jetton?: string;
+  nft?: string;
   yes?: boolean;
+}
+
+function requireAmount(amount: string | undefined): string {
+  if (amount === undefined) {
+    throw new AppError('InvalidAmount', 'An amount is required (omit it only with --nft).');
+  }
+  return amount;
 }
 
 export function registerSendCommand(program: Command): void {
   program
     .command('send')
-    .description('Send GRAM (or a jetton) to an address — emulated and confirmed first')
+    .description('Send GRAM, a jetton, or an NFT to an address — emulated and confirmed first')
     .argument('<to>', 'recipient address')
-    .argument('<amount>', 'amount to send, e.g. 1.5')
+    .argument('[amount]', 'amount to send for GRAM/jetton (omit for --nft)')
     .option('-c, --comment <text>', 'attach a text comment to the transfer')
     .option('--jetton <master>', 'send a jetton (by its master address) instead of GRAM')
+    .option('--nft <address>', 'send an NFT (by its item address) instead of GRAM')
     .option('--from <account>', 'sender wallet id or address (default: your default wallet)')
     .option('-y, --yes', 'skip the confirmation prompt (required when non-interactive)')
-    .action(async (to: string, amount: string, opts: SendOpts, command: Command) => {
+    .action(async (to: string, amount: string | undefined, opts: SendOpts, command: Command) => {
       const globals = readGlobals(command);
       const app = await buildApp({ network: globals.network });
       try {
         const passphrase = await promptPassphrase('Keystore passphrase: ');
         try {
           const confirm = makeConfirm(globals.json, opts.yes === true);
-          const result = opts.jetton
-            ? await app.transfers.sendJetton({
+          const result = opts.nft
+            ? await app.transfers.sendNft({
                 to,
-                jettonMaster: opts.jetton,
-                amount,
+                nftAddress: opts.nft,
                 comment: opts.comment,
                 from: opts.from,
                 passphrase,
                 confirm,
               })
-            : await app.transfers.sendTon({
-                to,
-                amount: parseTon(amount),
-                comment: opts.comment,
-                from: opts.from,
-                passphrase,
-                confirm,
-              });
+            : opts.jetton
+              ? await app.transfers.sendJetton({
+                  to,
+                  jettonMaster: opts.jetton,
+                  amount: requireAmount(amount),
+                  comment: opts.comment,
+                  from: opts.from,
+                  passphrase,
+                  confirm,
+                })
+              : await app.transfers.sendTon({
+                  to,
+                  amount: parseTon(requireAmount(amount)),
+                  comment: opts.comment,
+                  from: opts.from,
+                  passphrase,
+                  confirm,
+                });
 
           if (globals.json) {
             printJson({ hash: result.hash, status: result.status, explorer: result.explorerUrl });
