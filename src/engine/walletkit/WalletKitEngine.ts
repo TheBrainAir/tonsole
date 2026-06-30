@@ -110,6 +110,7 @@ export class WalletKitEngine implements WalletEngine {
   #kit: WalletKitInstance | undefined;
   #client: TonClient | undefined;
   #tcAccount: AccountRef | undefined;
+  #tcWalletId: string | undefined;
 
   constructor(deps: WalletKitEngineDeps) {
     this.#deps = deps;
@@ -306,12 +307,16 @@ export class WalletKitEngine implements WalletEngine {
               ? await wk.WalletV4R2Adapter.create(signer, { client, network: net })
               : await wk.WalletV5R1Adapter.create(signer, { client, network: net });
           await kit.addWallet(adapter);
+          // The kit keys wallets by getWalletId(); incoming dApp events carry no
+          // walletId, so we stamp this one on them before approving.
+          this.#tcWalletId = adapter.getWalletId();
         });
         this.#tcAccount = account;
       },
       submitUrl: (url) => kit.handleTonConnectUrl(url),
       onConnectRequest: (handler) => {
         kit.onConnectRequest((event) => {
+          if (this.#tcWalletId && !event.walletId) event.walletId = this.#tcWalletId;
           const req: ConnectRequest = {
             id: event.id,
             dappName: event.preview.dAppInfo?.name,
@@ -330,6 +335,7 @@ export class WalletKitEngine implements WalletEngine {
       },
       onTransactionRequest: (handler) => {
         kit.onTransactionRequest((event) => {
+          if (this.#tcWalletId && !event.walletId) event.walletId = this.#tcWalletId;
           const ourAddress = this.#tcAccount?.address ?? event.walletAddress ?? '';
           const preview = mapEmulatedPreview(event.preview.data ?? {}, ourAddress, () => 9);
           void handler({ id: event.id, preview })
