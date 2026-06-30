@@ -10,11 +10,33 @@ import { TextField } from '../components/TextField.js';
 import { ErrorBox } from '../components/ui.js';
 import { useApp } from '../context.js';
 
-type Phase = 'form' | 'working' | 'confirm' | 'broadcasting' | 'done' | 'error';
+/** What is being sent — set when arriving from the Jettons/NFT screens. */
+export type SendPreset =
+  | { kind: 'jetton'; master: string; symbol?: string; decimals: number }
+  | { kind: 'nft'; address: string; name?: string };
 
-export function SendScreen({ account, onDone }: { account: AccountRef; onDone: () => void }) {
+type Phase = 'form' | 'working' | 'confirm' | 'broadcasting' | 'done' | 'error';
+type Field = 'to' | 'amount' | 'comment' | 'pass';
+
+export function SendScreen({
+  account,
+  onDone,
+  preset,
+}: {
+  account: AccountRef;
+  onDone: () => void;
+  preset?: SendPreset | null;
+}) {
   const app = useApp();
-  const [field, setField] = useState<'to' | 'amount' | 'comment' | 'pass'>('to');
+  const isNft = preset?.kind === 'nft';
+  const isJetton = preset?.kind === 'jetton';
+  const assetLabel = isNft
+    ? `NFT ${preset.name ?? ''}`.trim()
+    : isJetton
+      ? (preset.symbol ?? 'jetton')
+      : 'GRAM';
+
+  const [field, setField] = useState<Field>('to');
   const [to, setTo] = useState('');
   const [amount, setAmount] = useState('');
   const [comment, setComment] = useState('');
@@ -25,18 +47,18 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
   const [error, setError] = useState<Error | null>(null);
   const resolverRef = useRef<((ok: boolean) => void) | null>(null);
 
+  const fail = (e: unknown) => {
+    setError(e instanceof Error ? e : new Error(String(e)));
+    setPhase('error');
+  };
+
   const submit = () => {
     if (!isValidAddress(to)) {
-      setError(new AppError('InvalidAddress', `Invalid recipient address: "${to}"`));
-      setPhase('error');
+      fail(new AppError('InvalidAddress', `Invalid recipient address: "${to}"`));
       return;
     }
-    let nano: bigint;
-    try {
-      nano = parseTon(amount);
-    } catch (e) {
-      setError(e instanceof Error ? e : new Error(String(e)));
-      setPhase('error');
+    if (!isNft && amount.trim() === '') {
+      setField('amount');
       return;
     }
     if (pass.length === 0) {
@@ -46,6 +68,7 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
 
     setPhase('working');
     const passphrase = new SecretString(pass);
+    const comm = comment.trim() || undefined;
     const confirm = (p: TxPreview): Promise<boolean> =>
       new Promise((resolve) => {
         setPreview(p);
@@ -53,26 +76,28 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
         resolverRef.current = resolve;
       });
 
-    app.transfers
-      .sendTon({
-        to,
-        amount: nano,
-        comment: comment.trim() || undefined,
-        from: account.address,
-        passphrase,
-        confirm,
-      })
+    let sending: Promise<SentResult>;
+    try {
+      sending =
+        preset?.kind === 'nft'
+          ? app.transfers.sendNft({ to, nftAddress: preset.address, comment: comm, from: account.address, passphrase, confirm })
+          : preset?.kind === 'jetton'
+            ? app.transfers.sendJetton({ to, jettonMaster: preset.master, amount, comment: comm, from: account.address, passphrase, confirm })
+            : app.transfers.sendTon({ to, amount: parseTon(amount), comment: comm, from: account.address, passphrase, confirm });
+    } catch (e) {
+      passphrase.destroy();
+      fail(e);
+      return;
+    }
+
+    sending
       .then((res) => {
         setResult(res);
         setPhase('done');
       })
       .catch((e: unknown) => {
-        if (AppError.is(e, 'Cancelled')) {
-          setPhase('form');
-          return;
-        }
-        setError(e instanceof Error ? e : new Error(String(e)));
-        setPhase('error');
+        if (AppError.is(e, 'Cancelled')) setPhase('form');
+        else fail(e);
       })
       .finally(() => passphrase.destroy());
   };
@@ -107,7 +132,7 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
     return (
       <Box flexDirection="column">
         <Text color="green" bold>
-          ✓ Sent {formatCoin(parseTon(amount))}
+          ✓ Sent {sentLabel(preset, amount)}
         </Text>
         {result?.explorerUrl ? <Text dimColor>{result.explorerUrl}</Text> : null}
         <Text dimColor>enter to go back</Text>
@@ -128,12 +153,7 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
               {deltaText(d)} <Text dimColor>→ {d.counterparty ?? to}</Text>
             </Text>
           ))}
-          {preview.moneyFlow.incoming.map((d, i) => (
-            <Text key={`i${i}`}>
-              <Text color="green">+ </Text>
-              {deltaText(d)}
-            </Text>
-          ))}
+          {isNft ? <Text>sending {assetLabel}</Text> : null}
           <Text dimColor>plus network gas</Text>
         </Box>
         <Box marginTop={1}>
@@ -147,24 +167,26 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
 
   return (
     <Box flexDirection="column">
-      <Text bold>Send GRAM</Text>
+      <Text bold>Send {assetLabel}</Text>
       <Box marginTop={1} flexDirection="column">
         <TextField
           label="To     "
           value={to}
           onChange={setTo}
           focus={field === 'to'}
-          onSubmit={() => setField('amount')}
+          onSubmit={() => setField(isNft ? 'comment' : 'amount')}
           placeholder="recipient address"
         />
-        <TextField
-          label="Amount "
-          value={amount}
-          onChange={setAmount}
-          focus={field === 'amount'}
-          onSubmit={() => setField('comment')}
-          placeholder="GRAM, e.g. 1.5"
-        />
+        {!isNft ? (
+          <TextField
+            label="Amount "
+            value={amount}
+            onChange={setAmount}
+            focus={field === 'amount'}
+            onSubmit={() => setField('comment')}
+            placeholder={isJetton ? `${assetLabel}, e.g. 10.5` : 'GRAM, e.g. 1.5'}
+          />
+        ) : null}
         <TextField
           label="Comment"
           value={comment}
@@ -188,6 +210,12 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
       </Box>
     </Box>
   );
+}
+
+function sentLabel(preset: SendPreset | null | undefined, amount: string): string {
+  if (preset?.kind === 'nft') return `NFT ${preset.name ?? ''}`.trim();
+  if (preset?.kind === 'jetton') return `${amount} ${preset.symbol ?? 'jetton'}`;
+  return formatCoin(parseTon(amount));
 }
 
 function deltaText(d: AssetDelta): string {

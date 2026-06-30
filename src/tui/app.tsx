@@ -16,7 +16,7 @@ import { JettonsScreen } from './screens/JettonsScreen.js';
 import { NftScreen } from './screens/NftScreen.js';
 import { OnboardingScreen } from './screens/OnboardingScreen.js';
 import { ReceiveScreen } from './screens/ReceiveScreen.js';
-import { SendScreen } from './screens/SendScreen.js';
+import { type SendPreset, SendScreen } from './screens/SendScreen.js';
 import { type TonConnectController, TonConnectProvider } from './tonconnect-context.js';
 
 export type Screen =
@@ -61,6 +61,12 @@ function Main({ accounts }: { accounts: StoredAccount[] }) {
 
   const push = (s: Screen) => setStack((st) => [...st, s]);
   const back = () => setStack((st) => (st.length > 1 ? st.slice(0, -1) : st));
+
+  const [sendPreset, setSendPreset] = useState<SendPreset | null>(null);
+  const goSend = (preset: SendPreset | null) => {
+    setSendPreset(preset);
+    push('send');
+  };
 
   // ── TON Connect, hoisted to the app level so the session survives leaving the
   //    Connect screen and dApp requests pop up over whatever screen is showing. ──
@@ -163,12 +169,17 @@ function Main({ accounts }: { accounts: StoredAccount[] }) {
               account={selected}
               accounts={accounts}
               selectedId={selectedId}
-              onNavigate={push}
+              sendPreset={sendPreset}
+              onNavigate={(s) => (s === 'send' ? goSend(null) : push(s))}
+              onSend={goSend}
               onSelectAccount={(id) => {
                 setSelectedId(id);
                 back();
               }}
-              onSendDone={back}
+              onSendDone={() => {
+                setSendPreset(null);
+                back();
+              }}
             />
           )}
         </Box>
@@ -183,7 +194,9 @@ function CurrentScreen({
   account,
   accounts,
   selectedId,
+  sendPreset,
   onNavigate,
+  onSend,
   onSelectAccount,
   onSendDone,
 }: {
@@ -191,21 +204,23 @@ function CurrentScreen({
   account: StoredAccount;
   accounts: StoredAccount[];
   selectedId: string;
+  sendPreset: SendPreset | null;
   onNavigate: (s: Screen) => void;
+  onSend: (preset: SendPreset) => void;
   onSelectAccount: (id: string) => void;
   onSendDone: () => void;
 }) {
   switch (screen) {
     case 'send':
-      return <SendScreen account={account.account} onDone={onSendDone} />;
+      return <SendScreen account={account.account} onDone={onSendDone} preset={sendPreset} />;
     case 'receive':
       return <ReceiveScreen account={account.account} />;
     case 'history':
       return <HistoryScreen account={account.account} />;
     case 'jettons':
-      return <JettonsScreen account={account.account} />;
+      return <JettonsScreen account={account.account} onSend={onSend} />;
     case 'nft':
-      return <NftScreen account={account.account} />;
+      return <NftScreen account={account.account} onSend={onSend} />;
     case 'connect':
       return <ConnectScreen account={account.account} />;
     case 'accounts':
