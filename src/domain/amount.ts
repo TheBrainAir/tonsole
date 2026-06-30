@@ -51,6 +51,15 @@ export function formatAmount(
   return negative ? `-${body}` : body;
 }
 
-/** Convenience wrappers for native TON amounts. */
+/** Convenience wrappers for native-coin amounts (9 decimals). */
 export const parseTon = (input: string): bigint => parseAmount(input, TON_DECIMALS);
 export const formatTon = (nano: bigint): string => formatAmount(nano, TON_DECIMALS);
+
+/**
+ * Display ticker of the native coin. The Open Network's coin was renamed
+ * Toncoin (TON) -> Gram (GRAM) on 2026-06-15; the blockchain itself is still "TON".
+ */
+export const COIN_SYMBOL = 'GRAM';
+
+/** Format a native-coin amount with its ticker, e.g. "1.5 GRAM". */
+export const formatCoin = (nano: bigint): string => `${formatTon(nano)} ${COIN_SYMBOL}`;

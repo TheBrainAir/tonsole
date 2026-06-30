@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { buildApp } from '../../composition.js';
-import { formatAmount, formatTon } from '../../domain/amount.js';
+import { formatAmount, formatCoin } from '../../domain/amount.js';
 import type { HistoryItem } from '../../engine/types.js';
 import { readGlobals } from '../context.js';
 import { info, printJson } from '../render.js';
@@ -37,7 +37,7 @@ export function registerHistoryCommand(program: Command): void {
 }
 
 function amountText(item: HistoryItem): string {
-  if (item.asset === 'TON') return `${formatTon(item.amount)} TON`;
+  if (item.asset === 'TON') return formatCoin(item.amount);
   return `${formatAmount(item.amount, item.asset.decimals)} ${item.asset.symbol ?? 'jetton'}`;
 }
 
@@ -62,7 +62,7 @@ function serialize(item: HistoryItem): Record<string, unknown> {
     timestamp: item.timestamp,
     direction: item.direction,
     amount: item.amount,
-    asset: item.asset === 'TON' ? 'TON' : item.asset.jettonMaster,
+    asset: item.asset === 'TON' ? 'GRAM' : item.asset.jettonMaster,
     comment: item.comment,
     status: item.status,
   };

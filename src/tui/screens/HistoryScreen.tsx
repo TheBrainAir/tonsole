@@ -1,5 +1,5 @@
 import { Box, Text } from 'ink';
-import { formatAmount } from '../../domain/amount.js';
+import { formatAmount, formatCoin } from '../../domain/amount.js';
 import type { AccountRef, HistoryItem } from '../../engine/types.js';
 import { Loading } from '../components/ui.js';
 import { useApp } from '../context.js';
@@ -30,7 +30,7 @@ function Row({ item }: { item: HistoryItem }) {
   const abs = item.amount < 0n ? -item.amount : item.amount;
   const text =
     item.asset === 'TON'
-      ? `${formatAmount(abs, 9)} TON`
+      ? formatCoin(abs)
       : `${formatAmount(abs, item.asset.decimals)} ${item.asset.symbol ?? 'jetton'}`;
   const when = new Date(item.timestamp * 1000).toISOString().slice(0, 16).replace('T', ' ');
   return (

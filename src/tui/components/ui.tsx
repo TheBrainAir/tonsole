@@ -1,6 +1,6 @@
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
-import { formatTon } from '../../domain/amount.js';
+import { COIN_SYMBOL, formatTon } from '../../domain/amount.js';
 
 export function Loading({ label = 'Loading…' }: { label?: string }) {
   return <Text dimColor>{label}</Text>;
@@ -20,7 +20,7 @@ export function ErrorBox({ error }: { error: Error }) {
 export function TonAmount({ nano, bold = false }: { nano: bigint; bold?: boolean }) {
   return (
     <Text bold={bold} color="green">
-      {formatTon(nano)} TON
+      {formatTon(nano)} {COIN_SYMBOL}
     </Text>
   );
 }

@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { buildApp } from '../../composition.js';
-import { formatAmount, formatTon, parseTon } from '../../domain/amount.js';
+import { formatAmount, formatCoin, parseTon } from '../../domain/amount.js';
 import { AppError } from '../../engine/errors.js';
 import type { AssetDelta, TxPreview } from '../../engine/types.js';
 import { promptPassphrase, readLine } from '../../secrets/passphrase.js';
@@ -18,11 +18,11 @@ interface SendOpts {
 export function registerSendCommand(program: Command): void {
   program
     .command('send')
-    .description('Send TON (or a jetton) to an address — emulated and confirmed first')
+    .description('Send GRAM (or a jetton) to an address — emulated and confirmed first')
     .argument('<to>', 'recipient address')
     .argument('<amount>', 'amount to send, e.g. 1.5')
     .option('-c, --comment <text>', 'attach a text comment to the transfer')
-    .option('--jetton <master>', 'send a jetton (by its master address) instead of TON')
+    .option('--jetton <master>', 'send a jetton (by its master address) instead of GRAM')
     .option('--from <account>', 'sender wallet id or address (default: your default wallet)')
     .option('-y, --yes', 'skip the confirmation prompt (required when non-interactive)')
     .action(async (to: string, amount: string, opts: SendOpts, command: Command) => {
@@ -86,7 +86,7 @@ function makeConfirm(json: boolean, yes: boolean): (preview: TxPreview) => Promi
 
 function deltaText(d: AssetDelta): string {
   const abs = d.amount < 0n ? -d.amount : d.amount;
-  if (d.asset === 'TON') return `${formatTon(abs)} TON`;
+  if (d.asset === 'TON') return formatCoin(abs);
   return `${formatAmount(abs, d.asset.decimals)} ${d.asset.symbol ?? 'jetton'}`;
 }
 

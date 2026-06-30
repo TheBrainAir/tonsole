@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 scriptable **Commander CLI** commands. **ESM-only, Node ≥ 22.12, React 19** (forced by Ink 7 + commander 15).
 
 Status: the **v1 core is functional — milestones M0–M4 are complete**: encrypted keystore + create/import,
-balances (TON + jettons), send (TON + jettons) with an emulation preview + confirmation, receive + QR,
+balances (GRAM + jettons), send (GRAM + jettons) with an emulation preview + confirmation, receive + QR,
 transaction history, and a full interactive **Ink TUI** (`src/tui/`) plus the scriptable CLI. M5 (TON
 Connect) and M6 (NFTs + packaging) remain. See the roadmap below.
 
@@ -105,7 +105,11 @@ UI, go through a service. This compiler-enforces the seam; do not weaken it.
 
 ## Addresses & amounts (easy to get wrong)
 
-- TON has **9 decimals** (nanotons). Jettons have **variable decimals** (USDT = 6) — always resolve
+- **Coin name:** the native coin was renamed Toncoin → **GRAM** (June 2026); the blockchain/network is still
+  **TON**. Label the coin **GRAM** in user-facing output via `COIN_SYMBOL` / `formatCoin` (`src/domain/amount.ts`);
+  keep **TON** for addresses, TON Connect, `@ton/*`, and network names. Internally the native asset
+  discriminant is still `'TON'` (`Asset = 'TON' | {...}`) — only the *display* says GRAM.
+- The native coin has **9 decimals** (nanotons). Jettons have **variable decimals** (USDT = 6) — always resolve
   `decimals` from indexer metadata before formatting or building a transfer; never hardcode 9.
 - Compare/store addresses by **raw form** (`0:…`). For display use the **non-bounceable `UQ…`** form for
   wallets (WalletKit returns this by default). `EQ` (bounceable) vs `UQ` of the same account differ only
