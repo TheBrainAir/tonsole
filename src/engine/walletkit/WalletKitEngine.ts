@@ -21,6 +21,7 @@ import type {
   TxPreview,
   UnsignedTransfer,
 } from '../types.js';
+import { normalizeStoredEvent } from './tonconnect-normalize.js';
 
 /** Structural subset of WalletKit's TransactionEmulatedPreview that we consume. */
 interface RawEmulatedPreview {
@@ -83,6 +84,10 @@ function mapEmulatedPreview(
 // dynamic import yields the full namespace and works in both runtimes: tsx fixes
 // resolution in dev, and tsup bundles @ton/walletkit (noExternal) so esbuild inlines
 // and fixes it for the published bin. See spike/FINDINGS.md.
+// Silence WalletKit's console logger (defaults to ERROR) so its internal logs
+// never corrupt the Ink TUI; user-facing errors are surfaced via our handlers.
+// Honour an explicit override if the user set one.
+process.env.WALLETKIT_LOG_LEVEL ??= 'none';
 const wk = await import('@ton/walletkit');
 
 type WalletKitInstance = InstanceType<typeof wk.TonWalletKit>;
@@ -120,6 +125,23 @@ export class WalletKitEngine implements WalletEngine {
     return network === 'testnet' ? wk.Network.testnet() : wk.Network.mainnet();
   }
 
+  /**
+   * MemoryStorageAdapter wrapper that rewrites raw → friendly addresses in stored
+   * TON Connect transaction requests, so WalletKit's friendly-only validation
+   * accepts dApps (e.g. minter.ton.org) that send raw message addresses.
+   */
+  #normalizingStorage(): InstanceType<typeof wk.MemoryStorageAdapter> {
+    const inner = new wk.MemoryStorageAdapter({});
+    const testnet = this.#deps.network === 'testnet';
+    const wrapper = {
+      get: (key: string) => inner.get(key),
+      set: (key: string, value: string) => inner.set(key, normalizeStoredEvent(value, testnet)),
+      remove: (key: string) => inner.remove(key),
+      clear: () => inner.clear(),
+    };
+    return wrapper as unknown as InstanceType<typeof wk.MemoryStorageAdapter>;
+  }
+
   async init(): Promise<void> {
     // The TON Connect bridge handles SSE via @tonconnect/isomorphic-eventsource,
     // which works under Node on its own — no global EventSource polyfill needed.
@@ -127,7 +149,7 @@ export class WalletKitEngine implements WalletEngine {
     this.#kit = new wk.TonWalletKit({
       deviceInfo: wk.createDeviceInfo(),
       walletManifest: wk.createWalletManifest(),
-      storage: new wk.MemoryStorageAdapter({}),
+      storage: this.#normalizingStorage(),
       networks: {
         [net.chainId]: {
           apiClient: { url: this.#deps.toncenterUrl, key: this.#deps.toncenterKey },

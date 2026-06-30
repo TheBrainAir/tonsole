@@ -52,6 +52,15 @@ relative imports raw Node can't resolve, and Node can't statically bind its *nam
   own dep) — **no** global EventSource polyfill is needed. Do not add an `eventsource` dependency: it
   gets externalized by tsup and the bundled bridge then resolves it (v4, no default export) instead of
   isomorphic-eventsource's `eventsource@2`, breaking the bundle. Core wallet ops use `fetch` (Node 22).
+- WalletKit's logger writes to the **console** (default level ERROR) and would corrupt the full-screen
+  Ink TUI. `WalletKitEngine.ts` sets `process.env.WALLETKIT_LOG_LEVEL ??= 'none'` **before** the dynamic
+  import to silence it; user-facing errors are surfaced through our own handlers, not the console.
+- WalletKit's TON Connect validation hard-requires **friendly** message addresses and rejects raw
+  `0:<hex>` ones (which the spec allows), killing dApps like minter.ton.org *before* the approval prompt.
+  The kit validates events read back from its storage adapter, so `WalletKitEngine.#normalizingStorage`
+  wraps `MemoryStorageAdapter` and `tonconnect-normalize.ts` rewrites raw→friendly message addresses on
+  write (non-bounceable when a stateInit is present); the top-level `from` is left raw (compared with
+  `Address.equals`).
 
 `spike/FINDINGS.md` records the verified WalletKit API (real export names, adapter shapes, reusable
 helpers like `parseUnits`/`formatUnits`/`isValidAddress`/`getJettonsFromClient`/`ApiClientToncenter`).
