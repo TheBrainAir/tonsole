@@ -6,9 +6,12 @@
 interactive **TUI** and scriptable **CLI** commands, built on the official
 [TON WalletKit](https://docs.ton.org/applications/walletkit/overview) SDK.
 
-**Status:** 🚧 early development (milestone M0 — scaffolding). Not yet usable.
+**Status:** 🚧 active development — the **v1 core is functional** (milestones M0–M4). Create/import a wallet,
+view TON + jetton balances, send TON and jettons with an emulation preview, receive with a QR, and browse
+history — via both an interactive **TUI** (`tonsole`) and scriptable **CLI** commands. TON Connect and NFTs
+are next.
 
-## Planned features (v1)
+## Features (v1)
 
 - Create / import a wallet from a 24-word recovery phrase, multiple accounts
 - Encrypted keystore (Argon2id + AES-256-GCM), keys never leave your machine
