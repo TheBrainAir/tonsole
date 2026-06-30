@@ -28,8 +28,19 @@ function flushStdout(): Promise<void> {
 const program = buildProgram();
 
 if (process.argv.length <= 2) {
-  program.outputHelp();
-  process.exit(0);
+  // No subcommand: launch the interactive TUI on a real terminal, else show help.
+  if (process.stdin.isTTY) {
+    try {
+      const { runTui } = await import('./tui/run.js');
+      await runTui();
+      process.exit(0);
+    } catch (error) {
+      fail(error);
+    }
+  } else {
+    program.outputHelp();
+    process.exit(0);
+  }
 }
 
 try {
