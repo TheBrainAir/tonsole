@@ -7,6 +7,7 @@ import { TonApiClient } from './network/tonapi/TonApiClient.js';
 import { AccountService } from './services/AccountService.js';
 import { BalanceService } from './services/BalanceService.js';
 import { HistoryService } from './services/HistoryService.js';
+import { NftService } from './services/NftService.js';
 import { ReceiveService } from './services/ReceiveService.js';
 import { TransferService } from './services/TransferService.js';
 
@@ -18,6 +19,7 @@ export interface App {
   receive: ReceiveService;
   transfers: TransferService;
   history: HistoryService;
+  nfts: NftService;
   dispose(): Promise<void>;
 }
 
@@ -54,6 +56,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<App> {
     receive: new ReceiveService(config),
     transfers: new TransferService(engine, accounts, indexer),
     history: new HistoryService(indexer),
+    nfts: new NftService(indexer),
     dispose: () => engine.dispose(),
   };
 }

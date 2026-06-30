@@ -50,6 +50,18 @@ export interface JettonBalance {
   verified?: boolean;
 }
 
+/** An NFT item held by an account. */
+export interface NftItem {
+  /** NFT item contract address (user-friendly). */
+  address: string;
+  name?: string;
+  collectionName?: string;
+  collectionAddress?: string;
+  image?: string;
+  index?: string;
+  verified?: boolean;
+}
+
 /** What the UI submits to build a transfer. */
 export type TransferIntent =
   | { kind: 'ton'; to: string; amount: bigint; comment?: string; bounce?: boolean }

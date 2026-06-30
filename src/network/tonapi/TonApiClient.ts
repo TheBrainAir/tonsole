@@ -1,5 +1,5 @@
 import { sameAddress } from '../../domain/address.js';
-import type { AccountRef, Asset, HistoryItem, JettonBalance, Page } from '../../engine/types.js';
+import type { AccountRef, Asset, HistoryItem, JettonBalance, NftItem, Page } from '../../engine/types.js';
 import { getJson } from '../http.js';
 import type { HistoryQuery, IndexerPort } from '../IndexerPort.js';
 
@@ -10,6 +10,17 @@ interface TonApiJettonBalance {
 }
 interface TonApiJettonsResponse {
   balances?: TonApiJettonBalance[];
+}
+
+interface TonApiNftItem {
+  address?: string;
+  index?: number | string;
+  verified?: boolean;
+  collection?: { address?: string; name?: string };
+  metadata?: { name?: string; image?: string };
+}
+interface TonApiNftsResponse {
+  nft_items?: TonApiNftItem[];
 }
 
 // Minimal structural views of the TonAPI `/v2/accounts/{id}/events` response.
@@ -85,6 +96,24 @@ export class TonApiClient implements IndexerPort {
         verified: b.jetton?.verification === 'whitelist',
       }))
       .filter((j) => j.master !== '');
+  }
+
+  async getNfts(account: AccountRef): Promise<NftItem[]> {
+    const url = `${this.baseUrl}/v2/accounts/${encodeURIComponent(account.address)}/nfts?limit=200&indirect_ownership=false`;
+    const data = await getJson<TonApiNftsResponse>(url, {
+      headers: this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : undefined,
+    });
+    return (data.nft_items ?? [])
+      .map((n) => ({
+        address: n.address ?? '',
+        name: n.metadata?.name,
+        collectionName: n.collection?.name,
+        collectionAddress: n.collection?.address,
+        image: n.metadata?.image,
+        index: n.index === undefined ? undefined : String(n.index),
+        verified: n.verified,
+      }))
+      .filter((n) => n.address !== '');
   }
 
   #mapAction(action: TonApiAction, event: TonApiEvent, account: AccountRef): HistoryItem {

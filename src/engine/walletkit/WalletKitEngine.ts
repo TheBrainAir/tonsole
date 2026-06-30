@@ -218,7 +218,6 @@ export class WalletKitEngine implements WalletEngine {
     ctx: SigningContext,
     onPreview?: (preview: TxPreview) => Promise<boolean>,
   ): Promise<SendResult> {
-    if (intent.kind === 'nft') throw laterMilestone('NFT transfers');
     await this.#preCheckTonBalance(acct, intent);
 
     return ctx.withMnemonic(async (mnemonic): Promise<SendResult> => {
@@ -231,12 +230,18 @@ export class WalletKitEngine implements WalletEngine {
               transferAmount: intent.amount.toString(),
               ...comment,
             })
-          : await wallet.createTransferJettonTransaction({
-              jettonAddress: normalizeRecipient(intent.jettonMaster, acct.network),
-              recipientAddress: normalizeRecipient(intent.to, acct.network),
-              transferAmount: intent.amount.toString(),
-              ...comment,
-            });
+          : intent.kind === 'jetton'
+            ? await wallet.createTransferJettonTransaction({
+                jettonAddress: normalizeRecipient(intent.jettonMaster, acct.network),
+                recipientAddress: normalizeRecipient(intent.to, acct.network),
+                transferAmount: intent.amount.toString(),
+                ...comment,
+              })
+            : await wallet.createTransferNftTransaction({
+                nftAddress: normalizeRecipient(intent.nftAddress, acct.network),
+                recipientAddress: normalizeRecipient(intent.to, acct.network),
+                ...comment,
+              });
 
       const preview = this.#mapPreview(await wallet.getTransactionPreview(request), acct, intent);
       if (!preview.ok) {

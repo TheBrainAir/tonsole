@@ -19,12 +19,11 @@ are next.
 
 - Create / import a wallet from a 24-word recovery phrase, multiple accounts
 - Encrypted keystore (Argon2id + AES-256-GCM), keys never leave your machine
-- Balances for GRAM (the native coin) and jettons; receive screen with a terminal QR code
-- Send GRAM and jettons with a transaction emulation preview and confirmation
-- Transaction history
+- Balances for GRAM (the native coin) and jettons; view your NFTs; receive screen with a terminal QR code
+- Send GRAM, jettons, and NFTs with a transaction emulation preview and confirmation
+- Interactive transaction history (navigate, copy address/hash/memo, open in Tonviewer)
+- TON Connect — connect to dApps and approve their connections/transactions from the terminal
 - Testnet and mainnet (testnet by default on first run)
-
-TON Connect (approving dApp transactions from the terminal) and NFTs come in later milestones.
 
 ## Development
 
