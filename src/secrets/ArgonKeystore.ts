@@ -34,6 +34,8 @@ export interface Keystore {
   version: 3;
   id: string;
   address: string;
+  /** Optional user-assigned label, for display. */
+  label?: string;
   ton: KeystoreTonMeta;
   crypto: {
     cipher: 'aes-256-gcm';

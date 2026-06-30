@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { buildApp } from '../../composition.js';
+import { AppError } from '../../engine/errors.js';
 import { promptPassphrase, readLine } from '../../secrets/passphrase.js';
 import type { WalletVersion } from '../../engine/types.js';
 import { readGlobals } from '../context.js';
@@ -95,6 +96,7 @@ export function registerWalletCommands(program: Command): void {
               network: a.account.network,
               version: a.account.version,
               default: a.isDefault,
+              label: a.label,
             })),
           );
           return;
@@ -105,7 +107,10 @@ export function registerWalletCommands(program: Command): void {
         }
         for (const a of accounts) {
           const mark = a.isDefault ? chalk.green('*') : ' ';
-          info(`${mark} ${chalk.bold(a.account.address)}  ${chalk.dim(`${a.account.network} ${a.account.version} · ${a.id}`)}`);
+          const name = a.label
+            ? `${chalk.bold(a.label)} ${chalk.dim(a.account.address)}`
+            : chalk.bold(a.account.address);
+          info(`${mark} ${name}  ${chalk.dim(`${a.account.network} ${a.account.version} · ${a.id}`)}`);
         }
       } finally {
         await app.dispose();
@@ -126,6 +131,60 @@ export function registerWalletCommands(program: Command): void {
           return;
         }
         success(`Default wallet set to ${chalk.bold(chosen.account.address)}`);
+      } finally {
+        await app.dispose();
+      }
+    });
+
+  wallet
+    .command('rename')
+    .description('Set or clear a wallet label')
+    .argument('<account>', 'wallet id or address')
+    .argument('[label]', 'new label (omit to clear)')
+    .action(async (account: string, label: string | undefined, _opts: unknown, command: Command) => {
+      const globals = readGlobals(command);
+      const app = await buildApp({ network: globals.network });
+      try {
+        const a = app.accounts.rename(account, label ?? '');
+        if (globals.json) printJson({ id: a.id, address: a.account.address, label: a.label });
+        else success(a.label ? `Labeled ${chalk.bold(a.label)}.` : 'Label cleared.');
+      } finally {
+        await app.dispose();
+      }
+    });
+
+  wallet
+    .command('remove')
+    .alias('rm')
+    .description('Delete a wallet keystore (irreversible — keep your recovery phrase)')
+    .argument('<account>', 'wallet id or address')
+    .option('-y, --yes', 'skip the confirmation prompt')
+    .action(async (account: string, opts: { yes?: boolean }, command: Command) => {
+      const globals = readGlobals(command);
+      const app = await buildApp({ network: globals.network });
+      try {
+        const a = app.accounts.resolve(account);
+        if (opts.yes !== true) {
+          if (process.stdin.isTTY !== true) {
+            throw new AppError('Cancelled', 'Refusing to remove without --yes in a non-interactive shell.');
+          }
+          const ans = await readLine(
+            `Delete wallet ${a.label ? `"${a.label}" ` : ''}${a.account.address}? Ensure you have its recovery phrase. [y/N]: `,
+          );
+          if (!/^y(es)?$/i.test(ans.trim())) {
+            info('Cancelled — nothing was removed.');
+            return;
+          }
+        }
+        app.accounts.remove(a.id);
+        if (globals.json) printJson({ removed: a.id });
+        else success('Wallet removed.');
+      } catch (error) {
+        if (AppError.is(error, 'Cancelled')) {
+          info('Cancelled — nothing was removed.');
+          return;
+        }
+        throw error;
       } finally {
         await app.dispose();
       }

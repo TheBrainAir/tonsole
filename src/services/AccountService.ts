@@ -6,13 +6,14 @@ import { AppError } from '../engine/errors.js';
 import type { SigningContext, WalletEngine } from '../engine/WalletEngine.js';
 import type { AccountRef, WalletVersion } from '../engine/types.js';
 import { type KeystoreTonMeta, decryptKeystore, encryptKeystore } from '../secrets/ArgonKeystore.js';
-import { findKeystore, listKeystores, saveKeystore } from '../secrets/keystore-file.js';
+import { deleteKeystore, findKeystore, listKeystores, saveKeystore } from '../secrets/keystore-file.js';
 import type { SecretString } from '../secrets/secret-string.js';
 
 export interface StoredAccount {
   id: string;
   account: AccountRef;
   isDefault: boolean;
+  label?: string;
 }
 
 function accountFromMeta(meta: KeystoreTonMeta): AccountRef {
@@ -65,6 +66,7 @@ export class AccountService {
       id: keystore.id,
       account: accountFromMeta(keystore.ton),
       isDefault: keystore.id === def || keystore.address === def,
+      label: keystore.label,
     }));
   }
 
@@ -91,6 +93,25 @@ export class AccountService {
     const acct = this.resolve(idOrAddress);
     saveConfigPatch({ defaultAccount: acct.id });
     return acct;
+  }
+
+  /** Set (or clear, with an empty string) a wallet's display label. */
+  rename(idOrAddress: string, label: string): StoredAccount {
+    const found = findKeystore(idOrAddress);
+    if (!found) throw new AppError('KeystoreNotFound', `No wallet matching "${idOrAddress}".`);
+    saveKeystore({ ...found.keystore, label: label.trim() || undefined });
+    return this.resolve(found.keystore.id);
+  }
+
+  /** Delete a wallet's keystore. Reassigns the default if it pointed here. */
+  remove(idOrAddress: string): void {
+    const acct = this.resolve(idOrAddress);
+    const wasDefault =
+      this.config.defaultAccount === acct.id || this.config.defaultAccount === acct.account.address;
+    deleteKeystore(acct.id);
+    if (wasDefault) {
+      saveConfigPatch({ defaultAccount: this.list()[0]?.id });
+    }
   }
 
   /**

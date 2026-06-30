@@ -46,10 +46,10 @@ function Root() {
   if (accounts.length === 0) {
     return <OnboardingScreen onDone={reload} />;
   }
-  return <Main accounts={accounts} />;
+  return <Main accounts={accounts} onReload={reload} />;
 }
 
-function Main({ accounts }: { accounts: StoredAccount[] }) {
+function Main({ accounts, onReload }: { accounts: StoredAccount[]; onReload: () => void }) {
   const app = useApp();
   const { exit } = useInkApp();
   const [selectedId, setSelectedId] = useState(
@@ -183,6 +183,7 @@ function Main({ accounts }: { accounts: StoredAccount[] }) {
               sendPreset={sendPreset}
               onNavigate={(s) => (s === 'send' ? goSend(null) : push(s))}
               onSend={goSend}
+              onReload={onReload}
               onSelectAccount={(id) => {
                 setSelectedId(id);
                 back();
@@ -208,6 +209,7 @@ function CurrentScreen({
   sendPreset,
   onNavigate,
   onSend,
+  onReload,
   onSelectAccount,
   onSendDone,
 }: {
@@ -218,6 +220,7 @@ function CurrentScreen({
   sendPreset: SendPreset | null;
   onNavigate: (s: Screen) => void;
   onSend: (preset: SendPreset) => void;
+  onReload: () => void;
   onSelectAccount: (id: string) => void;
   onSendDone: () => void;
 }) {
@@ -235,7 +238,14 @@ function CurrentScreen({
     case 'connect':
       return <ConnectScreen account={account.account} />;
     case 'accounts':
-      return <AccountsScreen accounts={accounts} selectedId={selectedId} onSelect={onSelectAccount} />;
+      return (
+        <AccountsScreen
+          accounts={accounts}
+          selectedId={selectedId}
+          onSelect={onSelectAccount}
+          onReload={onReload}
+        />
+      );
     default:
       return (
         <DashboardScreen
@@ -257,7 +267,10 @@ function Header({ account, connected }: { account: StoredAccount; connected: boo
         <Text dimColor> · {account.account.network}</Text>
         {connected ? <Text color="green"> · 🔗 connected</Text> : null}
       </Text>
-      <Text color="yellow">{account.account.address}</Text>
+      <Text color="yellow">
+        {account.label ? `${account.label} · ` : ''}
+        {account.account.address}
+      </Text>
     </Box>
   );
 }
