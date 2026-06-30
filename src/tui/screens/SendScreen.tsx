@@ -1,12 +1,13 @@
 import { Box, Text, useInput } from 'ink';
 import { useRef, useState } from 'react';
 import { isDnsName, isValidAddress } from '../../domain/address.js';
-import { formatAmount, formatCoin, parseTon } from '../../domain/amount.js';
+import { formatCoin, parseTon } from '../../domain/amount.js';
 import { AppError } from '../../engine/errors.js';
-import type { AccountRef, AssetDelta, TxPreview } from '../../engine/types.js';
+import type { AccountRef, TxPreview } from '../../engine/types.js';
 import { SecretString } from '../../secrets/secret-string.js';
 import type { SentResult } from '../../services/TransferService.js';
 import { TextField } from '../components/TextField.js';
+import { TxSummary } from '../components/TxSummary.js';
 import { ErrorBox } from '../components/ui.js';
 import { useApp } from '../context.js';
 
@@ -148,20 +149,10 @@ export function SendScreen({
   if (phase === 'confirm' && preview) {
     return (
       <Box flexDirection="column">
-        <Text bold>Confirm transaction (emulated)</Text>
-        <Box flexDirection="column" marginTop={1}>
-          {preview.moneyFlow.outgoing.map((d, i) => (
-            <Text key={`o${i}`}>
-              <Text color="red">− </Text>
-              {deltaText(d)} <Text dimColor>→ {d.counterparty ?? to}</Text>
-            </Text>
-          ))}
-          {isNft ? <Text>sending {assetLabel}</Text> : null}
-          <Text dimColor>plus network gas</Text>
-        </Box>
+        <TxSummary preview={preview} />
         <Box marginTop={1}>
           <Text>
-            Send? <Text color="cyan">[y/N]</Text>
+            Send {assetLabel}? <Text color="cyan">[y/N]</Text>
           </Text>
         </Box>
       </Box>
@@ -220,10 +211,4 @@ function sentLabel(preset: SendPreset | null | undefined, amount: string): strin
   if (preset?.kind === 'jetton') return `${amount} ${preset.symbol ?? 'jetton'}`;
   if (/^(max|all)$/i.test(amount.trim())) return 'all GRAM';
   return formatCoin(parseTon(amount));
-}
-
-function deltaText(d: AssetDelta): string {
-  const abs = d.amount < 0n ? -d.amount : d.amount;
-  if (d.asset === 'TON') return formatCoin(abs);
-  return `${formatAmount(abs, d.asset.decimals)} ${d.asset.symbol ?? 'jetton'}`;
 }
