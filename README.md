@@ -7,16 +7,20 @@ interactive **TUI** and scriptable **CLI** commands, built on the official
 [TON WalletKit](https://docs.ton.org/applications/walletkit/overview) SDK.
 
 **Status:** 🚧 active development — the **v1 core is functional** (milestones M0–M4). Create/import a wallet,
-view TON + jetton balances, send TON and jettons with an emulation preview, receive with a QR, and browse
+view GRAM + jetton balances, send GRAM and jettons with an emulation preview, receive with a QR, and browse
 history — via both an interactive **TUI** (`tonsole`) and scriptable **CLI** commands. TON Connect and NFTs
 are next.
+
+> **GRAM vs TON:** the network's native coin was renamed Toncoin → **GRAM** (ticker GRAM) in June 2026.
+> The blockchain itself is still **TON** (The Open Network), so addresses, TON Connect and the SDK keep the
+> TON name; only the coin is labelled GRAM.
 
 ## Features (v1)
 
 - Create / import a wallet from a 24-word recovery phrase, multiple accounts
 - Encrypted keystore (Argon2id + AES-256-GCM), keys never leave your machine
-- Balances for TON and jettons; receive screen with a terminal QR code
-- Send TON and jettons with a transaction emulation preview and confirmation
+- Balances for GRAM (the native coin) and jettons; receive screen with a terminal QR code
+- Send GRAM and jettons with a transaction emulation preview and confirmation
 - Transaction history
 - Testnet and mainnet (testnet by default on first run)
 

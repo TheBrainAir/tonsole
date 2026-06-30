@@ -1,5 +1,5 @@
 import { Box, Text } from 'ink';
-import { formatAmount } from '../../domain/amount.js';
+import { formatAmount, formatCoin } from '../../domain/amount.js';
 import type { AccountRef, HistoryItem } from '../../engine/types.js';
 import type { Screen } from '../app.js';
 import { SelectList, type SelectItem } from '../components/SelectList.js';
@@ -22,7 +22,7 @@ export function DashboardScreen({
   const history = useAsync(() => app.history.recent(account, { limit: 5 }), [account.address]);
 
   const items: SelectItem<Screen>[] = [
-    { label: 'Send', value: 'send', hint: 'transfer TON or a jetton' },
+    { label: 'Send', value: 'send', hint: 'transfer GRAM or a jetton' },
     { label: 'Receive', value: 'receive', hint: 'address & QR' },
     { label: 'History', value: 'history' },
     { label: 'Jettons', value: 'jettons' },
@@ -69,7 +69,7 @@ function HistoryRow({ item }: { item: HistoryItem }) {
   const abs = item.amount < 0n ? -item.amount : item.amount;
   const text =
     item.asset === 'TON'
-      ? `${formatAmount(abs, 9)} TON`
+      ? formatCoin(abs)
       : `${formatAmount(abs, item.asset.decimals)} ${item.asset.symbol ?? 'jetton'}`;
   return (
     <Text>

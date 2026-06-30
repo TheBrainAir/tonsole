@@ -46,7 +46,7 @@ describe('TUI', () => {
     const frame = lastFrame() ?? '';
     expect(frame).toContain('tonsole');
     expect(frame).toContain('Balance');
-    expect(frame).toContain('0 TON');
+    expect(frame).toContain('0 GRAM');
     expect(frame).toContain('Send');
     expect(frame).toContain('Receive');
     unmount();

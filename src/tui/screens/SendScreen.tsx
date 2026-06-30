@@ -1,7 +1,7 @@
 import { Box, Text, useInput } from 'ink';
 import { useRef, useState } from 'react';
 import { isValidAddress } from '../../domain/address.js';
-import { formatAmount, formatTon, parseTon } from '../../domain/amount.js';
+import { formatAmount, formatCoin, parseTon } from '../../domain/amount.js';
 import { AppError } from '../../engine/errors.js';
 import type { AccountRef, AssetDelta, TxPreview } from '../../engine/types.js';
 import { SecretString } from '../../secrets/secret-string.js';
@@ -99,7 +99,7 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
     return (
       <Box flexDirection="column">
         <Text color="green" bold>
-          ✓ Sent {formatTon(parseTon(amount))} TON
+          ✓ Sent {formatCoin(parseTon(amount))}
         </Text>
         {result?.explorerUrl ? <Text dimColor>{result.explorerUrl}</Text> : null}
         <Text dimColor>enter to go back</Text>
@@ -139,7 +139,7 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
 
   return (
     <Box flexDirection="column">
-      <Text bold>Send TON</Text>
+      <Text bold>Send GRAM</Text>
       <Box marginTop={1} flexDirection="column">
         <TextField
           label="To     "
@@ -155,7 +155,7 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
           onChange={setAmount}
           focus={field === 'amount'}
           onSubmit={() => setField('pass')}
-          placeholder="TON, e.g. 1.5"
+          placeholder="GRAM, e.g. 1.5"
         />
         <TextField
           label="Pass   "
@@ -176,6 +176,6 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
 
 function deltaText(d: AssetDelta): string {
   const abs = d.amount < 0n ? -d.amount : d.amount;
-  if (d.asset === 'TON') return `${formatTon(abs)} TON`;
+  if (d.asset === 'TON') return formatCoin(abs);
   return `${formatAmount(abs, d.asset.decimals)} ${d.asset.symbol ?? 'jetton'}`;
 }
