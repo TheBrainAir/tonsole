@@ -1,0 +1,133 @@
+import chalk from 'chalk';
+import type { Command } from 'commander';
+import { buildApp } from '../../composition.js';
+import { promptPassphrase, readLine } from '../../secrets/passphrase.js';
+import type { WalletVersion } from '../../engine/types.js';
+import { readGlobals } from '../context.js';
+import { info, printJson, renderMnemonic, success, warn } from '../render.js';
+
+const versionFrom = (opts: { v4?: boolean }): WalletVersion => (opts.v4 ? 'v4r2' : 'v5r1');
+
+export function registerWalletCommands(program: Command): void {
+  const wallet = program.command('wallet').description('Create, import and manage wallets');
+
+  wallet
+    .command('create')
+    .description('Create a new wallet and a 24-word recovery phrase')
+    .option('--v4', 'use the v4r2 contract instead of the default v5r1 (W5)')
+    .action(async (opts: { v4?: boolean }, command: Command) => {
+      const globals = readGlobals(command);
+      const app = await buildApp({ network: globals.network });
+      try {
+        const passphrase = await promptPassphrase('Set a keystore passphrase: ', {
+          confirm: true,
+          minLength: 8,
+        });
+        try {
+          const { account, mnemonic, id } = await app.accounts.create(passphrase, {
+            version: versionFrom(opts),
+          });
+          if (globals.json) {
+            printJson({ id, address: account.address, network: account.network, version: account.version, mnemonic });
+            return;
+          }
+          info();
+          warn('Write these 24 words down and store them offline — they are shown ONCE and can spend your funds.');
+          info();
+          info(renderMnemonic(mnemonic));
+          info();
+          success(`Wallet created on ${chalk.bold(account.network)}: ${chalk.bold(account.address)}`);
+          info(chalk.dim(`keystore id: ${id}`));
+        } finally {
+          passphrase.destroy();
+        }
+      } finally {
+        await app.dispose();
+      }
+    });
+
+  wallet
+    .command('import')
+    .description('Import a wallet from an existing 24-word recovery phrase')
+    .argument('[words...]', 'the 24 words (omit to be prompted on stdin)')
+    .option('--v4', 'use the v4r2 contract instead of the default v5r1 (W5)')
+    .action(async (words: string[], opts: { v4?: boolean }, command: Command) => {
+      const globals = readGlobals(command);
+      const app = await buildApp({ network: globals.network });
+      try {
+        const phrase = words.length > 0 ? words.join(' ') : await readLine('Recovery phrase (24 words): ');
+        const passphrase = await promptPassphrase('Set a keystore passphrase: ', {
+          confirm: true,
+          minLength: 8,
+        });
+        try {
+          const { account, id } = await app.accounts.importMnemonic(phrase, passphrase, {
+            version: versionFrom(opts),
+          });
+          if (globals.json) {
+            printJson({ id, address: account.address, network: account.network, version: account.version });
+            return;
+          }
+          success(`Wallet imported on ${chalk.bold(account.network)}: ${chalk.bold(account.address)}`);
+          info(chalk.dim(`keystore id: ${id}`));
+        } finally {
+          passphrase.destroy();
+        }
+      } finally {
+        await app.dispose();
+      }
+    });
+
+  wallet
+    .command('list')
+    .alias('ls')
+    .description('List your wallets')
+    .action(async (_opts: unknown, command: Command) => {
+      const globals = readGlobals(command);
+      const app = await buildApp({ network: globals.network });
+      try {
+        const accounts = app.accounts.list();
+        if (globals.json) {
+          printJson(
+            accounts.map((a) => ({
+              id: a.id,
+              address: a.account.address,
+              network: a.account.network,
+              version: a.account.version,
+              default: a.isDefault,
+            })),
+          );
+          return;
+        }
+        if (accounts.length === 0) {
+          info('No wallets yet. Create one with `tonsole wallet create`.');
+          return;
+        }
+        for (const a of accounts) {
+          const mark = a.isDefault ? chalk.green('*') : ' ';
+          info(`${mark} ${chalk.bold(a.account.address)}  ${chalk.dim(`${a.account.network} ${a.account.version} · ${a.id}`)}`);
+        }
+      } finally {
+        await app.dispose();
+      }
+    });
+
+  wallet
+    .command('use')
+    .description('Set the default wallet')
+    .argument('<account>', 'wallet id or address')
+    .action(async (account: string, _opts: unknown, command: Command) => {
+      const globals = readGlobals(command);
+      const app = await buildApp({ network: globals.network });
+      try {
+        const chosen = app.accounts.setDefault(account);
+        if (globals.json) {
+          printJson({ id: chosen.id, address: chosen.account.address, default: true });
+          return;
+        }
+        success(`Default wallet set to ${chalk.bold(chosen.account.address)}`);
+      } finally {
+        await app.dispose();
+      }
+    });
+}

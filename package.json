@@ -1,0 +1,64 @@
+{
+  "name": "tonsole",
+  "version": "0.1.0",
+  "description": "Open-source TUI/CLI wallet for the TON blockchain, built on TON WalletKit.",
+  "keywords": [
+    "ton",
+    "wallet",
+    "cli",
+    "tui",
+    "walletkit",
+    "blockchain",
+    "crypto"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "tonsole": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "spike": "tsx spike/walletkit-node.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@ton/core": "^0.63.0",
+    "@ton/crypto": "^3.3.0",
+    "@ton/ton": "^16.0.0",
+    "@ton/walletkit": "^1.0.0",
+    "argon2": "^0.44.0",
+    "chalk": "^5.3.0",
+    "cli-table3": "^0.6.5",
+    "clipboardy": "^4.0.0",
+    "commander": "^15.0.0",
+    "ink": "^7.1.0",
+    "qrcode-terminal": "^0.12.0",
+    "react": "^19.2.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^22.0.0",
+    "@types/qrcode-terminal": "^0.12.0",
+    "@types/react": "^19.0.0",
+    "eslint": "^9.0.0",
+    "ink-testing-library": "^4.0.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^4.0.0"
+  }
+}
