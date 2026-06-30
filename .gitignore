@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# Secrets / local environment — never commit
+.env
+.env.*
+!.env.example
+
+# Guard against accidentally committing any wallet keystore
+*.keystore.json
+keystore/
+.tonsole/
