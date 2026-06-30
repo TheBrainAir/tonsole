@@ -7,6 +7,7 @@ import { TonsoleApp } from './app.js';
 import { AppProvider } from './context.js';
 import { ConnectScreen } from './screens/ConnectScreen.js';
 import { HistoryScreen } from './screens/HistoryScreen.js';
+import { SendScreen } from './screens/SendScreen.js';
 import { TonConnectProvider } from './tonconnect-context.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -123,6 +124,39 @@ describe('TUI', () => {
     expect(frame).toContain('1.5 GRAM');
     expect(frame).toContain('0.5 GRAM');
     expect(frame).toContain('UQsenderaddress'); // detail panel for the selected item
+    unmount();
+  });
+
+  it('send screen adapts to an NFT preset (no amount field)', () => {
+    const { lastFrame, unmount } = render(
+      <AppProvider value={fakeApp({ accountsList: [account] })}>
+        <SendScreen
+          account={account.account}
+          onDone={() => {}}
+          preset={{ kind: 'nft', address: 'EQnft', name: 'Cool NFT' }}
+        />
+      </AppProvider>,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Send NFT Cool NFT');
+    expect(frame).toContain('To');
+    expect(frame).not.toContain('Amount');
+    unmount();
+  });
+
+  it('send screen adapts to a jetton preset (amount in jetton units)', () => {
+    const { lastFrame, unmount } = render(
+      <AppProvider value={fakeApp({ accountsList: [account] })}>
+        <SendScreen
+          account={account.account}
+          onDone={() => {}}
+          preset={{ kind: 'jetton', master: 'EQmaster', symbol: 'USDT', decimals: 6 }}
+        />
+      </AppProvider>,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Send USDT');
+    expect(frame).toContain('Amount');
     unmount();
   });
 });
