@@ -1,12 +1,11 @@
 import chalk from 'chalk';
 import type { Command } from 'commander';
-import type { App } from '../../composition.js';
 import { buildApp } from '../../composition.js';
-import { isValidAddress, parseAddress, toFriendly, toRaw } from '../../domain/address.js';
 import { formatAmount, formatTon } from '../../domain/amount.js';
-import type { AccountRef, HistoryItem, NetworkId } from '../../engine/types.js';
+import type { HistoryItem } from '../../engine/types.js';
 import { readGlobals } from '../context.js';
 import { info, printJson } from '../render.js';
+import { resolveAccountArg } from '../resolve.js';
 
 export function registerHistoryCommand(program: Command): void {
   program
@@ -18,7 +17,7 @@ export function registerHistoryCommand(program: Command): void {
       const globals = readGlobals(command);
       const app = await buildApp({ network: globals.network });
       try {
-        const acct = resolveAccount(app, account);
+        const acct = resolveAccountArg(app, account);
         const limit = Number.parseInt(opts.limit, 10) || 20;
         const page = await app.history.recent(acct, { limit });
 
@@ -35,30 +34,6 @@ export function registerHistoryCommand(program: Command): void {
         await app.dispose();
       }
     });
-}
-
-/** A stored wallet (by id/address), or — for read-only viewing — any valid address. */
-function resolveAccount(app: App, account: string | undefined): AccountRef {
-  try {
-    return app.accounts.resolve(account).account;
-  } catch (error) {
-    if (account && isValidAddress(account)) {
-      return accountRefFromAddress(account, app.config.network);
-    }
-    throw error;
-  }
-}
-
-function accountRefFromAddress(input: string, network: NetworkId): AccountRef {
-  const address = parseAddress(input);
-  return {
-    address: toFriendly(address, { network, bounceable: false }),
-    rawAddress: toRaw(address),
-    workchain: address.workChain,
-    version: 'v5r1',
-    publicKey: '',
-    network,
-  };
 }
 
 function amountText(item: HistoryItem): string {

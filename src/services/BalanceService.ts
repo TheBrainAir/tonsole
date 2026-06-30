@@ -1,11 +1,19 @@
 import type { WalletEngine } from '../engine/WalletEngine.js';
-import type { AccountRef, Balance } from '../engine/types.js';
+import type { AccountRef, Balance, JettonBalance } from '../engine/types.js';
+import type { IndexerPort } from '../network/IndexerPort.js';
 
-/** Reads balances for an account. Jetton balances arrive in M3. */
+/** Reads balances: native TON from the engine, jetton balances from the indexer. */
 export class BalanceService {
-  constructor(private readonly engine: WalletEngine) {}
+  constructor(
+    private readonly engine: WalletEngine,
+    private readonly indexer: IndexerPort,
+  ) {}
 
   getTon(account: AccountRef): Promise<Balance> {
     return this.engine.getBalance(account);
+  }
+
+  getJettons(account: AccountRef): Promise<JettonBalance[]> {
+    return this.indexer.getJettons(account);
   }
 }

@@ -1,14 +1,15 @@
 import { NETWORKS } from '../config/networks.js';
+import { sameAddress } from '../domain/address.js';
+import { parseAmount } from '../domain/amount.js';
 import { AppError } from '../engine/errors.js';
 import type { WalletEngine } from '../engine/WalletEngine.js';
-import type { SendResult, TxPreview } from '../engine/types.js';
+import type { NetworkId, SendResult, TxPreview } from '../engine/types.js';
+import type { IndexerPort } from '../network/IndexerPort.js';
 import type { SecretString } from '../secrets/secret-string.js';
 import type { AccountService } from './AccountService.js';
 
-export interface SendTonParams {
+interface BaseSendParams {
   to: string;
-  /** Amount in nanotons. */
-  amount: bigint;
   comment?: string;
   /** Sender wallet id/address; defaults to the default wallet. */
   from?: string;
@@ -17,32 +18,74 @@ export interface SendTonParams {
   confirm: (preview: TxPreview) => Promise<boolean>;
 }
 
-export interface SentTon extends SendResult {
+export interface SendTonParams extends BaseSendParams {
+  /** Amount in nanotons. */
+  amount: bigint;
+}
+
+export interface SendJettonParams extends BaseSendParams {
+  /** Jetton master (minter) address. */
+  jettonMaster: string;
+  /** Human amount string (e.g. "10.5"); parsed with the jetton's own decimals. */
+  amount: string;
+}
+
+export interface SentResult extends SendResult {
   explorerUrl?: string;
 }
 
-/** Orchestrates the send saga across keystore (signing) and engine (emulate/send). */
+/** Orchestrates the send saga across keystore (signing), indexer and engine. */
 export class TransferService {
   constructor(
     private readonly engine: WalletEngine,
     private readonly accounts: AccountService,
+    private readonly indexer: IndexerPort,
   ) {}
 
-  async sendTon(params: SendTonParams): Promise<SentTon> {
-    if (!this.engine.transfer) {
-      throw new AppError('EngineUnsupported', 'The active engine cannot send transactions yet.');
-    }
+  async sendTon(params: SendTonParams): Promise<SentResult> {
     const stored = this.accounts.resolve(params.from);
     const ctx = this.accounts.signingContext(stored, params.passphrase);
-    const result = await this.engine.transfer(
+    const result = await this.#transfer()(
       stored.account,
       { kind: 'ton', to: params.to, amount: params.amount, comment: params.comment },
       ctx,
       params.confirm,
     );
-    const explorerUrl = result.hash
-      ? NETWORKS[stored.account.network].explorerTx(result.hash)
-      : undefined;
+    return this.#withExplorer(result, stored.account.network);
+  }
+
+  async sendJetton(params: SendJettonParams): Promise<SentResult> {
+    const stored = this.accounts.resolve(params.from);
+    const held = (await this.indexer.getJettons(stored.account)).find((j) =>
+      sameAddress(j.master, params.jettonMaster),
+    );
+    if (!held) {
+      throw new AppError('InvalidAddress', `This wallet does not hold a jetton with master ${params.jettonMaster}.`);
+    }
+    const amount = parseAmount(params.amount, held.decimals);
+    if (held.amount < amount) {
+      throw new AppError('InsufficientBalance', `Insufficient ${held.symbol ?? 'jetton'} balance.`, {
+        details: { have: held.amount.toString(), want: amount.toString() },
+      });
+    }
+    const ctx = this.accounts.signingContext(stored, params.passphrase);
+    const result = await this.#transfer()(
+      stored.account,
+      { kind: 'jetton', jettonMaster: held.master, to: params.to, amount, decimals: held.decimals, comment: params.comment },
+      ctx,
+      params.confirm,
+    );
+    return this.#withExplorer(result, stored.account.network);
+  }
+
+  #transfer(): NonNullable<WalletEngine['transfer']> {
+    const fn = this.engine.transfer?.bind(this.engine);
+    if (!fn) throw new AppError('EngineUnsupported', 'The active engine cannot send transactions yet.');
+    return fn;
+  }
+
+  #withExplorer(result: SendResult, network: NetworkId): SentResult {
+    const explorerUrl = result.hash ? NETWORKS[network].explorerTx(result.hash) : undefined;
     return { ...result, explorerUrl };
   }
 }
