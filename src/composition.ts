@@ -50,9 +50,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<App> {
     config,
     engine,
     accounts,
-    balances: new BalanceService(engine),
+    balances: new BalanceService(engine, indexer),
     receive: new ReceiveService(config),
-    transfers: new TransferService(engine, accounts),
+    transfers: new TransferService(engine, accounts, indexer),
     history: new HistoryService(indexer),
     dispose: () => engine.dispose(),
   };

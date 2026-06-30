@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { registerBalanceCommand } from './commands/balance.js';
 import { registerHistoryCommand } from './commands/history.js';
+import { registerJettonsCommand } from './commands/jettons.js';
 import { registerReceiveCommand } from './commands/receive.js';
 import { registerSendCommand } from './commands/send.js';
 import { registerWalletCommands } from './commands/wallet.js';
@@ -19,6 +20,7 @@ export function buildProgram(): Command {
   registerBalanceCommand(program);
   registerSendCommand(program);
   registerReceiveCommand(program);
+  registerJettonsCommand(program);
   registerHistoryCommand(program);
 
   return program;

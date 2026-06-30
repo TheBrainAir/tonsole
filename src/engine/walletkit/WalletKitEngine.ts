@@ -177,26 +177,27 @@ export class WalletKitEngine implements WalletEngine {
     ctx: SigningContext,
     onPreview?: (preview: TxPreview) => Promise<boolean>,
   ): Promise<SendResult> {
-    if (intent.kind !== 'ton') throw laterMilestone('Jetton and NFT transfers');
-
-    const { nano } = await this.getBalance(acct);
-    if (nano < intent.amount) {
-      throw new AppError(
-        'InsufficientBalance',
-        `Balance is ${nano} nanotons but ${intent.amount} was requested.`,
-        { details: { balance: nano.toString(), amount: intent.amount.toString() } },
-      );
-    }
+    if (intent.kind === 'nft') throw laterMilestone('NFT transfers');
+    await this.#preCheckTonBalance(acct, intent);
 
     return ctx.withMnemonic(async (mnemonic): Promise<SendResult> => {
       const wallet = await this.#walletFor(mnemonic, acct);
-      const request = await wallet.createTransferTonTransaction({
-        recipientAddress: normalizeRecipient(intent.to, acct.network),
-        transferAmount: intent.amount.toString(),
-        ...(intent.comment === undefined ? {} : { comment: intent.comment }),
-      });
+      const comment = intent.comment === undefined ? {} : { comment: intent.comment };
+      const request =
+        intent.kind === 'ton'
+          ? await wallet.createTransferTonTransaction({
+              recipientAddress: normalizeRecipient(intent.to, acct.network),
+              transferAmount: intent.amount.toString(),
+              ...comment,
+            })
+          : await wallet.createTransferJettonTransaction({
+              jettonAddress: normalizeRecipient(intent.jettonMaster, acct.network),
+              recipientAddress: normalizeRecipient(intent.to, acct.network),
+              transferAmount: intent.amount.toString(),
+              ...comment,
+            });
 
-      const preview = this.#mapPreview(await wallet.getTransactionPreview(request), acct);
+      const preview = this.#mapPreview(await wallet.getTransactionPreview(request), acct, intent);
       if (!preview.ok) {
         throw new AppError('EmulationFailed', preview.warnings[0] ?? 'Transaction emulation failed.', {
           details: { warnings: preview.warnings },
@@ -209,6 +210,20 @@ export class WalletKitEngine implements WalletEngine {
       const sent = await wallet.sendTransaction(request);
       return { hash: sent.normalizedHash, status: 'submitted' };
     });
+  }
+
+  /** TON sends need enough TON for the amount; jetton sends only need gas (caught by
+   *  emulation), and the jetton amount is validated by the service layer. */
+  async #preCheckTonBalance(acct: AccountRef, intent: TransferIntent): Promise<void> {
+    if (intent.kind !== 'ton') return;
+    const { nano } = await this.getBalance(acct);
+    if (nano < intent.amount) {
+      throw new AppError(
+        'InsufficientBalance',
+        `Balance is ${nano} nanotons but ${intent.amount} was requested.`,
+        { details: { balance: nano.toString(), amount: intent.amount.toString() } },
+      );
+    }
   }
 
   async #walletFor(mnemonic: string[], acct: AccountRef) {
@@ -225,13 +240,21 @@ export class WalletKitEngine implements WalletEngine {
     return wallet;
   }
 
-  #mapPreview(preview: RawEmulatedPreview, acct: AccountRef): TxPreview {
+  #mapPreview(preview: RawEmulatedPreview, acct: AccountRef, intent: TransferIntent): TxPreview {
     const outgoing: AssetDelta[] = [];
     const incoming: AssetDelta[] = [];
     for (const item of preview.moneyFlow?.ourTransfers ?? []) {
       const amount = BigInt(item.amount);
       const isOut = item.fromAddress !== undefined && sameAddress(item.fromAddress, acct.address);
-      const asset: Asset = item.tokenAddress ? { jettonMaster: item.tokenAddress, decimals: 9 } : 'TON';
+      const decimals =
+        intent.kind === 'jetton' &&
+        item.tokenAddress !== undefined &&
+        sameAddress(item.tokenAddress, intent.jettonMaster)
+          ? intent.decimals
+          : 9;
+      const asset: Asset = item.tokenAddress
+        ? { jettonMaster: item.tokenAddress, decimals }
+        : 'TON';
       (isOut ? outgoing : incoming).push({
         asset,
         amount: isOut ? -amount : amount,

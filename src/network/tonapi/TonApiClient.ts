@@ -1,7 +1,16 @@
 import { sameAddress } from '../../domain/address.js';
-import type { AccountRef, Asset, HistoryItem, Page } from '../../engine/types.js';
+import type { AccountRef, Asset, HistoryItem, JettonBalance, Page } from '../../engine/types.js';
 import { getJson } from '../http.js';
 import type { HistoryQuery, IndexerPort } from '../IndexerPort.js';
+
+interface TonApiJettonBalance {
+  balance?: string;
+  wallet_address?: { address?: string };
+  jetton?: { address?: string; name?: string; symbol?: string; decimals?: number; verification?: string };
+}
+interface TonApiJettonsResponse {
+  balances?: TonApiJettonBalance[];
+}
 
 // Minimal structural views of the TonAPI `/v2/accounts/{id}/events` response.
 interface TonApiAddress {
@@ -58,6 +67,24 @@ export class TonApiClient implements IndexerPort {
       }
     }
     return { items, nextCursor: data.next_from ? String(data.next_from) : undefined };
+  }
+
+  async getJettons(account: AccountRef): Promise<JettonBalance[]> {
+    const url = `${this.baseUrl}/v2/accounts/${encodeURIComponent(account.address)}/jettons`;
+    const data = await getJson<TonApiJettonsResponse>(url, {
+      headers: this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : undefined,
+    });
+    return (data.balances ?? [])
+      .map((b) => ({
+        master: b.jetton?.address ?? '',
+        walletAddress: b.wallet_address?.address ?? '',
+        amount: BigInt(b.balance ?? 0),
+        decimals: b.jetton?.decimals ?? 9,
+        symbol: b.jetton?.symbol,
+        name: b.jetton?.name,
+        verified: b.jetton?.verification === 'whitelist',
+      }))
+      .filter((j) => j.master !== '');
   }
 
   #mapAction(action: TonApiAction, event: TonApiEvent, account: AccountRef): HistoryItem {
