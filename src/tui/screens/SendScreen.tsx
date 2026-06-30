@@ -14,9 +14,10 @@ type Phase = 'form' | 'working' | 'confirm' | 'broadcasting' | 'done' | 'error';
 
 export function SendScreen({ account, onDone }: { account: AccountRef; onDone: () => void }) {
   const app = useApp();
-  const [field, setField] = useState<'to' | 'amount' | 'pass'>('to');
+  const [field, setField] = useState<'to' | 'amount' | 'comment' | 'pass'>('to');
   const [to, setTo] = useState('');
   const [amount, setAmount] = useState('');
+  const [comment, setComment] = useState('');
   const [pass, setPass] = useState('');
   const [phase, setPhase] = useState<Phase>('form');
   const [preview, setPreview] = useState<TxPreview | null>(null);
@@ -53,7 +54,14 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
       });
 
     app.transfers
-      .sendTon({ to, amount: nano, from: account.address, passphrase, confirm })
+      .sendTon({
+        to,
+        amount: nano,
+        comment: comment.trim() || undefined,
+        from: account.address,
+        passphrase,
+        confirm,
+      })
       .then((res) => {
         setResult(res);
         setPhase('done');
@@ -154,8 +162,16 @@ export function SendScreen({ account, onDone }: { account: AccountRef; onDone: (
           value={amount}
           onChange={setAmount}
           focus={field === 'amount'}
-          onSubmit={() => setField('pass')}
+          onSubmit={() => setField('comment')}
           placeholder="GRAM, e.g. 1.5"
+        />
+        <TextField
+          label="Comment"
+          value={comment}
+          onChange={setComment}
+          focus={field === 'comment'}
+          onSubmit={() => setField('pass')}
+          placeholder="optional memo"
         />
         <TextField
           label="Pass   "
