@@ -7,6 +7,7 @@ import { TonsoleApp } from './app.js';
 import { AppProvider } from './context.js';
 import { ConnectScreen } from './screens/ConnectScreen.js';
 import { HistoryScreen } from './screens/HistoryScreen.js';
+import { TonConnectProvider } from './tonconnect-context.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -73,7 +74,11 @@ describe('TUI', () => {
   it('TON Connect screen shows the unlock prompt', () => {
     const { lastFrame, unmount } = render(
       <AppProvider value={fakeApp({ accountsList: [account] })}>
-        <ConnectScreen account={account.account} />
+        <TonConnectProvider
+          value={{ unlocked: false, status: '', unlock: async () => {}, submitUrl: async () => {} }}
+        >
+          <ConnectScreen account={account.account} />
+        </TonConnectProvider>
       </AppProvider>,
     );
     const frame = lastFrame() ?? '';

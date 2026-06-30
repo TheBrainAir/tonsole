@@ -121,11 +121,8 @@ export class WalletKitEngine implements WalletEngine {
   }
 
   async init(): Promise<void> {
-    // The TON Connect bridge uses Server-Sent Events; Node has no global EventSource.
-    if (typeof (globalThis as Record<string, unknown>).EventSource === 'undefined') {
-      const { EventSource } = await import('eventsource');
-      (globalThis as Record<string, unknown>).EventSource = EventSource;
-    }
+    // The TON Connect bridge handles SSE via @tonconnect/isomorphic-eventsource,
+    // which works under Node on its own — no global EventSource polyfill needed.
     const net = this.#wkNetwork(this.#deps.network);
     this.#kit = new wk.TonWalletKit({
       deviceInfo: wk.createDeviceInfo(),

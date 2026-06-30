@@ -48,8 +48,10 @@ relative imports raw Node can't resolve, and Node can't statically bind its *nam
   `@ton/crypto`, `@ton/ton` stay external (well-formed, shared at runtime); `argon2` stays external (native).
 - The ESM bundle needs a `require` shim (createRequire banner in `tsup.config.ts`) because a bundled CJS
   dep (tweetnacl) calls `require('crypto')`.
-- `EventSource` is not a Node global; the TON Connect bridge (SSE) needs it, so `WalletKitEngine.init()`
-  installs the `eventsource` polyfill on `globalThis`. Core wallet ops use `fetch` (present in Node 22).
+- The TON Connect bridge (SSE) works under Node via `@tonconnect/isomorphic-eventsource` (walletkit's
+  own dep) — **no** global EventSource polyfill is needed. Do not add an `eventsource` dependency: it
+  gets externalized by tsup and the bundled bridge then resolves it (v4, no default export) instead of
+  isomorphic-eventsource's `eventsource@2`, breaking the bundle. Core wallet ops use `fetch` (Node 22).
 
 `spike/FINDINGS.md` records the verified WalletKit API (real export names, adapter shapes, reusable
 helpers like `parseUnits`/`formatUnits`/`isValidAddress`/`getJettonsFromClient`/`ApiClientToncenter`).
