@@ -63,7 +63,7 @@ export class TransferService {
       stored.account,
       { kind: 'ton', to, amount, comment: params.comment, max: params.sendMax },
       ctx,
-      params.confirm,
+      this.#confirmWithDns(params.confirm, params.to, to),
     );
     return this.#withExplorer(result, stored.account.network);
   }
@@ -88,7 +88,7 @@ export class TransferService {
       stored.account,
       { kind: 'jetton', jettonMaster: held.master, to, amount, decimals: held.decimals, comment: params.comment },
       ctx,
-      params.confirm,
+      this.#confirmWithDns(params.confirm, params.to, to),
     );
     return this.#withExplorer(result, stored.account.network);
   }
@@ -107,9 +107,27 @@ export class TransferService {
       stored.account,
       { kind: 'nft', nftAddress: params.nftAddress, to, comment: params.comment },
       ctx,
-      params.confirm,
+      this.#confirmWithDns(params.confirm, params.to, to),
     );
     return this.#withExplorer(result, stored.account.network);
+  }
+
+  /**
+   * When the recipient was a `.ton`/`.t.me` name, add a line to the emulated preview
+   * showing what it resolved to, so the user explicitly confirms the resolution
+   * rather than trusting an unseen lookup (L8).
+   */
+  #confirmWithDns(
+    confirm: BaseSendParams['confirm'],
+    original: string,
+    resolved: string,
+  ): BaseSendParams['confirm'] {
+    if (!isDnsName(original)) return confirm;
+    return (preview) =>
+      confirm({
+        ...preview,
+        warnings: [`"${original}" resolves to ${resolved} — verify this is the intended recipient.`, ...preview.warnings],
+      });
   }
 
   /** Resolve a `.ton`/`.t.me` name to an address; pass through plain addresses. */

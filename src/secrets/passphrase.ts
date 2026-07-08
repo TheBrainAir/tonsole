@@ -38,6 +38,16 @@ export function readLine(prompt: string): Promise<string> {
 }
 
 /**
+ * Read one secret line WITHOUT echoing it (for a mnemonic entered interactively).
+ * On a pipe there is no terminal echo to suppress, so it reads the line plainly.
+ */
+export function readLineSecret(prompt: string): Promise<string> {
+  if (process.stdin.isTTY === true) return readLineHidden(prompt);
+  process.stdout.write(prompt);
+  return readLinePlain();
+}
+
+/**
  * Prompt for a passphrase without echoing it. For non-interactive/test use it honors
  * the TONSOLE_PASSPHRASE env var (documented as insecure — for automation only).
  * The returned SecretString should be `.destroy()`ed by the caller after use.
@@ -46,13 +56,22 @@ export async function promptPassphrase(
   prompt = 'Passphrase: ',
   opts?: { confirm?: boolean; minLength?: number },
 ): Promise<SecretString> {
+  const min = opts?.minLength ?? 1;
+
+  // Automation path. Still enforce the minimum length so an empty/1-char env value
+  // can't silently create a trivially-brute-forceable keystore (the interactive
+  // confirm is skipped — the value is provided programmatically).
   const fromEnv = process.env.TONSOLE_PASSPHRASE;
-  if (fromEnv !== undefined) return new SecretString(fromEnv);
+  if (fromEnv !== undefined) {
+    if (fromEnv.length < min) {
+      throw new AppError('WrongPassphrase', `TONSOLE_PASSPHRASE must be at least ${min} character(s).`);
+    }
+    return new SecretString(fromEnv);
+  }
 
   const interactive = process.stdin.isTTY === true;
   const value = interactive ? await readLineHidden(prompt) : await readLinePlain();
 
-  const min = opts?.minLength ?? 1;
   if (value.length < min) {
     throw new AppError('WrongPassphrase', `Passphrase must be at least ${min} character(s).`);
   }

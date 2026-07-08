@@ -1,7 +1,30 @@
 import { sameAddress } from '../../domain/address.js';
+import { sanitizeOptional } from '../../domain/sanitize.js';
 import type { AccountRef, Asset, HistoryItem, JettonBalance, NftItem, Page } from '../../engine/types.js';
 import { getJson } from '../http.js';
-import type { HistoryQuery, IndexerPort } from '../IndexerPort.js';
+import type { HistoryQuery, IndexerPort, JettonMeta } from '../IndexerPort.js';
+
+/**
+ * Parse an indexer-supplied amount into bigint without ever throwing: a single
+ * malformed/oversized transfer must not break the whole page. Non-integer or junk
+ * values collapse to 0n. (A JSON `number` above 2^53 has already lost precision at
+ * JSON.parse — the indexer returns amounts as strings, so this is a defensive floor.)
+ */
+function safeBigInt(v: string | number | undefined | null): bigint {
+  if (v === undefined || v === null) return 0n;
+  try {
+    if (typeof v === 'number') return Number.isFinite(v) ? BigInt(Math.trunc(v)) : 0n;
+    const s = v.trim();
+    return /^-?\d+$/.test(s) ? BigInt(s) : 0n;
+  } catch {
+    return 0n;
+  }
+}
+
+/** Clamp indexer-supplied token decimals to a sane range (some tokens omit/spoof it). */
+function safeDecimals(d: number | undefined): number {
+  return typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 30 ? d : 9;
+}
 
 interface TonApiJettonBalance {
   balance?: string;
@@ -28,6 +51,10 @@ interface TonApiNftItem {
 }
 interface TonApiNftsResponse {
   nft_items?: TonApiNftItem[];
+}
+
+interface TonApiJettonInfo {
+  metadata?: { name?: string; symbol?: string; decimals?: number | string };
 }
 
 // Minimal structural views of the TonAPI `/v2/accounts/{id}/events` response.
@@ -96,12 +123,18 @@ export class TonApiClient implements IndexerPort {
       .map((b) => ({
         master: b.jetton?.address ?? '',
         walletAddress: b.wallet_address?.address ?? '',
-        amount: BigInt(b.balance ?? 0),
-        decimals: b.jetton?.decimals ?? 9,
-        symbol: b.jetton?.symbol,
-        name: b.jetton?.name,
+        amount: safeBigInt(b.balance),
+        decimals: safeDecimals(b.jetton?.decimals),
+        symbol: sanitizeOptional(b.jetton?.symbol, { maxLen: 32 }),
+        name: sanitizeOptional(b.jetton?.name, { maxLen: 64 }),
         image: b.jetton?.image,
         verified: b.jetton?.verification === 'whitelist',
+        verification:
+          b.jetton?.verification === 'whitelist'
+            ? ('whitelist' as const)
+            : b.jetton?.verification === 'blacklist'
+              ? ('blacklist' as const)
+              : ('none' as const),
       }))
       .filter((j) => j.master !== '');
   }
@@ -114,14 +147,35 @@ export class TonApiClient implements IndexerPort {
     return (data.nft_items ?? [])
       .map((n) => ({
         address: n.address ?? '',
-        name: n.metadata?.name,
-        collectionName: n.collection?.name,
+        name: sanitizeOptional(n.metadata?.name, { maxLen: 80 }),
+        collectionName: sanitizeOptional(n.collection?.name, { maxLen: 80 }),
         collectionAddress: n.collection?.address,
         image: n.metadata?.image,
         index: n.index === undefined ? undefined : String(n.index),
         verified: n.verified,
       }))
       .filter((n) => n.address !== '');
+  }
+
+  async getJettonMeta(master: string): Promise<JettonMeta | undefined> {
+    if (!master) return undefined;
+    const url = `${this.baseUrl}/v2/jettons/${encodeURIComponent(master)}`;
+    try {
+      const data = await getJson<TonApiJettonInfo>(url, {
+        headers: this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : undefined,
+      });
+      const meta = data.metadata;
+      if (!meta) return undefined;
+      const decimalsRaw = typeof meta.decimals === 'string' ? Number.parseInt(meta.decimals, 10) : meta.decimals;
+      return {
+        decimals: safeDecimals(typeof decimalsRaw === 'number' ? decimalsRaw : undefined),
+        symbol: sanitizeOptional(meta.symbol, { maxLen: 32 }),
+        name: sanitizeOptional(meta.name, { maxLen: 64 }),
+      };
+    } catch {
+      // Metadata is best-effort; a lookup failure must not block an approval prompt.
+      return undefined;
+    }
   }
 
   #mapAction(action: TonApiAction, event: TonApiEvent, account: AccountRef): HistoryItem {
@@ -138,9 +192,9 @@ export class TonApiClient implements IndexerPort {
         ...base,
         direction,
         asset: 'TON',
-        amount: BigInt(t.amount ?? 0),
+        amount: safeBigInt(t.amount),
         counterparty: direction === 'out' ? t.recipient?.address : t.sender?.address,
-        comment: t.comment,
+        comment: sanitizeOptional(t.comment, { maxLen: 200 }),
       };
     }
 
@@ -149,16 +203,16 @@ export class TonApiClient implements IndexerPort {
       const direction = this.#direction(j.sender?.address, j.recipient?.address, account);
       const asset: Asset = {
         jettonMaster: j.jetton?.address ?? '',
-        symbol: j.jetton?.symbol,
-        decimals: j.jetton?.decimals ?? 9,
+        symbol: sanitizeOptional(j.jetton?.symbol, { maxLen: 32 }),
+        decimals: safeDecimals(j.jetton?.decimals),
       };
       return {
         ...base,
         direction,
         asset,
-        amount: BigInt(j.amount ?? 0),
+        amount: safeBigInt(j.amount),
         counterparty: direction === 'out' ? j.recipient?.address : j.sender?.address,
-        comment: j.comment,
+        comment: sanitizeOptional(j.comment, { maxLen: 200 }),
       };
     }
 
@@ -168,7 +222,7 @@ export class TonApiClient implements IndexerPort {
       direction: 'self',
       asset: 'TON',
       amount: 0n,
-      comment: action.simple_preview?.description ?? action.type,
+      comment: sanitizeOptional(action.simple_preview?.description ?? action.type, { maxLen: 200 }),
     };
   }
 

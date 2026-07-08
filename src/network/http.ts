@@ -25,13 +25,15 @@ export async function getJson<T>(url: string, options: HttpOptions = {}): Promis
     try {
       const res = await fetch(url, { headers, signal: controller.signal });
       if (res.status === 429) {
-        lastError = new AppError('RateLimited', `Rate limited by ${host}. Set an API key for higher limits.`);
+        // Don't retry into an already rate-limited endpoint — surface it immediately.
+        throw new AppError('RateLimited', `Rate limited by ${host}. Set an API key for higher limits.`);
       } else if (!res.ok) {
         throw new AppError('NetworkUnavailable', `HTTP ${res.status} from ${host}.`);
       } else {
         return (await res.json()) as T;
       }
     } catch (error) {
+      if (AppError.is(error, 'RateLimited')) throw error; // fail fast, don't retry a 429
       lastError = error;
     } finally {
       clearTimeout(timer);

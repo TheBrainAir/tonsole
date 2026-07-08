@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:
 import argon2 from 'argon2';
 import { AppError } from '../engine/errors.js';
 import type { NetworkId, WalletVersion } from '../engine/types.js';
+import { assertSafeKdfParams } from './keystore-schema.js';
 
 export interface KdfParams {
   salt: string;
@@ -99,6 +100,8 @@ export async function encryptKeystore(
 
 export async function decryptKeystore(keystore: Keystore, passphrase: string): Promise<string> {
   const { crypto: c } = keystore;
+  // Never feed attacker-controllable KDF params to the native argon2 binding unbounded.
+  assertSafeKdfParams(c.kdfparams);
   const salt = Buffer.from(c.kdfparams.salt, 'hex');
   const key = await deriveKey(passphrase, salt, c.kdfparams);
   try {

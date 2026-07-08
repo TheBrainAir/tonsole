@@ -50,6 +50,17 @@ export function toFriendly(
   });
 }
 
+/**
+ * Display-shorten an address (or hash): `UQBFGx7v…9PkTyu`. Pure string helper —
+ * the single truncation used by the TUI and CLI; never shortens a string that
+ * would not actually get shorter.
+ */
+export function shortenAddress(addr: string, opts?: { head?: number; tail?: number }): string {
+  const head = opts?.head ?? 8;
+  const tail = opts?.tail ?? 6;
+  return addr.length > head + tail + 1 ? `${addr.slice(0, head)}…${addr.slice(-tail)}` : addr;
+}
+
 /** True when two address strings (any form) refer to the same account. */
 export function sameAddress(a: string, b: string): boolean {
   try {
