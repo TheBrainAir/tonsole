@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { AccountRef } from '../engine/types.js';
+import type { AccountRef, TonConnectSessionInfo } from '../engine/types.js';
 
 /**
  * App-level TON Connect controller. Lives above the screen router so the session
@@ -9,8 +9,12 @@ import type { AccountRef } from '../engine/types.js';
 export interface TonConnectController {
   unlocked: boolean;
   status: string;
+  /** Currently connected dApp sessions (kept fresh by the app root). */
+  sessions?: TonConnectSessionInfo[];
   unlock(account: AccountRef, passphrase: string): Promise<void>;
   submitUrl(url: string): Promise<void>;
+  refreshSessions?(): Promise<void>;
+  disconnect?(sessionId?: string): Promise<void>;
 }
 
 const TonConnectContext = createContext<TonConnectController | null>(null);

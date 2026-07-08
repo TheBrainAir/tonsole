@@ -1,21 +1,43 @@
-import { Box, Text, useInput } from 'ink';
-import { useState } from 'react';
-import { AppError } from '../../engine/errors.js';
+import { Box, Text } from 'ink';
+import { useState, type ReactNode } from 'react';
 import { SecretString } from '../../secrets/secret-string.js';
-import { SelectList, type SelectItem } from '../components/SelectList.js';
+import { ListView, MenuRow } from '../components/ListView.js';
+import { CenteredModal, ConfirmBar } from '../components/Modal.js';
+import { Panel } from '../components/Panel.js';
+import { Spinner } from '../components/Spinner.js';
 import { TextField } from '../components/TextField.js';
-import { ErrorBox } from '../components/ui.js';
 import { useApp } from '../context.js';
+import { useKeymap } from '../shell/keymap.js';
+import { useViewport } from '../shell/viewport.js';
+import { color, symbol } from '../theme.js';
 
 type Mode = 'menu' | 'create-pass' | 'create-show' | 'import' | 'working' | 'error';
 
-export function OnboardingScreen({ onDone }: { onDone: () => void }) {
+const wordCount = (input: string): number => input.trim().split(/\s+/).filter(Boolean).length;
+
+export function OnboardingScreen({
+  onDone,
+  embedded = false,
+}: {
+  onDone: () => void;
+  /** True when pushed from the Accounts screen (adding another wallet):
+   *  esc at the menu then falls through to the app-level "back". */
+  embedded?: boolean;
+}) {
   const app = useApp();
+  const viewport = useViewport();
   const [mode, setMode] = useState<Mode>('menu');
+  const [workingLabel, setWorkingLabel] = useState('working…');
   const [pass, setPass] = useState('');
+  const [repeat, setRepeat] = useState('');
+  const [passField, setPassField] = useState<'pass' | 'repeat'>('pass');
+  const [passError, setPassError] = useState<string | null>(null);
+  const [repeatError, setRepeatError] = useState<string | null>(null);
   const [mnemonicInput, setMnemonicInput] = useState('');
+  const [mnemonicError, setMnemonicError] = useState<string | null>(null);
   const [mnemonic, setMnemonic] = useState<string[] | null>(null);
   const [address, setAddress] = useState('');
+  const [confirmSaved, setConfirmSaved] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [importField, setImportField] = useState<'mnemonic' | 'pass'>('mnemonic');
 
@@ -24,13 +46,40 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
     setMode('error');
   };
 
+  const toMenu = () => {
+    setMode('menu');
+    setPass('');
+    setRepeat('');
+    setPassField('pass');
+    setPassError(null);
+    setRepeatError(null);
+    setMnemonicError(null);
+    setImportField('mnemonic');
+  };
+
+  const toggleField = () => {
+    if (mode === 'create-pass') setPassField((f) => (f === 'pass' ? 'repeat' : 'pass'));
+    else if (mode === 'import') setImportField((f) => (f === 'mnemonic' ? 'pass' : 'mnemonic'));
+  };
+
   const doCreate = () => {
     if (pass.length < 8) {
-      fail(new AppError('WrongPassphrase', 'Passphrase must be at least 8 characters.'));
+      setPassError('at least 8 characters');
+      setPassField('pass');
       return;
     }
+    setPassError(null);
+    if (repeat !== pass) {
+      setRepeatError('does not match the passphrase');
+      setPassField('repeat');
+      return;
+    }
+    setRepeatError(null);
+    setWorkingLabel('creating your wallet…');
     setMode('working');
     const passphrase = new SecretString(pass);
+    setPass('');
+    setRepeat('');
     app.accounts
       .create(passphrase)
       .then((res) => {
@@ -43,12 +92,23 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
   };
 
   const doImport = () => {
-    if (pass.length < 8) {
-      fail(new AppError('WrongPassphrase', 'Passphrase must be at least 8 characters.'));
+    const words = wordCount(mnemonicInput);
+    if (words !== 24) {
+      setMnemonicError(`expected 24 words, got ${words}`);
+      setImportField('mnemonic');
       return;
     }
+    setMnemonicError(null);
+    if (pass.length < 8) {
+      setPassError('at least 8 characters');
+      setImportField('pass');
+      return;
+    }
+    setPassError(null);
+    setWorkingLabel('importing your wallet…');
     setMode('working');
     const passphrase = new SecretString(pass);
+    setPass('');
     app.accounts
       .importMnemonic(mnemonicInput, passphrase)
       .then(() => onDone())
@@ -56,118 +116,256 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
       .finally(() => passphrase.destroy());
   };
 
-  useInput(
-    (_input, key) => {
-      if (key.escape && (mode === 'create-pass' || mode === 'import')) setMode('menu');
-      else if (key.return && mode === 'create-show') onDone();
-      else if (key.return && mode === 'error') setMode('menu');
-    },
-    { isActive: mode !== 'menu' && mode !== 'working' },
+  // Form-mode keys: esc back to the menu, tab/↑↓ between fields.
+  useKeymap(
+    'screen',
+    [
+      { key: 'esc', label: 'back to menu', onPress: toMenu },
+      { key: 'tab', onPress: toggleField },
+      { key: '↑', match: (_i, k) => k.upArrow, onPress: toggleField },
+      { key: '↓', match: (_i, k) => k.downArrow, onPress: toggleField },
+    ],
+    { isActive: mode === 'create-pass' || mode === 'import' },
+  );
+  useKeymap('screen', [{ key: '⏎', label: 'back to menu', onPress: toMenu }], {
+    isActive: mode === 'error',
+  });
+  // Menu-mode hints (navigation itself lives in the ListView).
+  useKeymap(
+    'screen',
+    [
+      { key: '↑↓', label: 'move' },
+      { key: '⏎', label: 'select' },
+    ],
+    { isActive: mode === 'menu' },
+  );
+  // While the wallet is being created/imported, and on the phrase card, nothing
+  // may pop this screen (embedded mode has an app-level esc): an overlay scope
+  // masks it. The phrase card's ⏎ lives on the same scope.
+  useKeymap(
+    'overlay',
+    mode === 'create-show'
+      ? [{ key: '⏎', label: 'I have written them down', onPress: () => setConfirmSaved(true) }]
+      : [],
+    { isActive: mode === 'working' || (mode === 'create-show' && !confirmSaved) },
+  );
+
+  const card = (title: string, step: string | null, body: ReactNode, tone?: 'warning' | 'danger') => (
+    <Box
+      flexDirection="column"
+      flexGrow={viewport.isFullscreen ? 1 : undefined}
+      justifyContent="center"
+      alignItems="center"
+    >
+      <Panel width={Math.min(72, viewport.contentWidth)} title={title} tone={tone}>
+        {step ? <Text dimColor>{step}</Text> : null}
+        {body}
+      </Panel>
+    </Box>
   );
 
   if (mode === 'error' && error) {
-    return (
-      <Box flexDirection="column">
-        <ErrorBox error={error} />
-        <Text dimColor>enter to go back</Text>
-      </Box>
+    return card(
+      'Something went wrong',
+      null,
+      <Box flexDirection="column" marginTop={1}>
+        <Text color={color.danger}>{error.message}</Text>
+        <Box marginTop={1}>
+          <Text>
+            <Text color={color.accent}>⏎</Text>
+            <Text dimColor> back to the menu</Text>
+          </Text>
+        </Box>
+      </Box>,
+      'danger',
     );
   }
+
   if (mode === 'working') {
-    return <Text dimColor>working…</Text>;
+    return card(
+      embedded ? 'Add a wallet' : 'Welcome to tonsole',
+      null,
+      <Box marginTop={1}>
+        <Spinner label={workingLabel} />
+      </Box>,
+    );
   }
 
   if (mode === 'menu') {
-    const items: SelectItem<'create' | 'import'>[] = [
-      { label: 'Create a new wallet', value: 'create' },
-      { label: 'Import a recovery phrase', value: 'import' },
+    const items = [
+      { label: 'Create a new wallet', hint: 'fresh 24-word recovery phrase', value: 'create' as const },
+      { label: 'Import a recovery phrase', hint: 'restore an existing wallet', value: 'import' as const },
     ];
-    return (
-      <Box flexDirection="column">
-        <Text bold color="cyan">
-          Welcome to tonsole
-        </Text>
-        <Text dimColor>No wallet yet — let's set one up.</Text>
-        <Box marginTop={1}>
-          <SelectList
-            items={items}
-            onSelect={(v) => setMode(v === 'create' ? 'create-pass' : 'import')}
-          />
-        </Box>
-      </Box>
+    return card(
+      embedded ? 'Add a wallet' : 'Welcome to tonsole',
+      embedded ? 'It will live beside your other wallets.' : "No wallet yet — let's set one up.",
+      <Box flexDirection="column" marginTop={1}>
+        <ListView
+          items={items}
+          wrap
+          maxVisible={items.length}
+          renderItem={(item, { selected }) => (
+            <MenuRow label={item.label} hint={item.hint} selected={selected} />
+          )}
+          onActivate={(item) => setMode(item.value === 'create' ? 'create-pass' : 'import')}
+        />
+      </Box>,
     );
   }
 
   if (mode === 'create-pass') {
-    return (
-      <Box flexDirection="column">
-        <Text bold>Create wallet</Text>
-        <Text dimColor>Set a passphrase to encrypt your keystore (min 8 characters).</Text>
-        <Box marginTop={1}>
-          <TextField label="Passphrase" value={pass} onChange={setPass} onSubmit={doCreate} mask focus />
+    return card(
+      'Create wallet',
+      `Create ▸ 1 passphrase ${symbol.bullet} 2 recovery phrase ${symbol.bullet} 3 done`,
+      <Box flexDirection="column" marginTop={1}>
+        <Text dimColor>The passphrase encrypts your keystore on this machine.</Text>
+        <Box flexDirection="column" marginTop={1}>
+          <TextField
+            label="Passphrase"
+            value={pass}
+            onChange={(v) => {
+              setPass(v);
+              setPassError(null);
+            }}
+            onSubmit={() => setPassField('repeat')}
+            focus={passField === 'pass'}
+            mask
+            error={passError}
+            helper="min 8 characters"
+          />
+          <TextField
+            label="Repeat"
+            value={repeat}
+            onChange={(v) => {
+              setRepeat(v);
+              setRepeatError(null);
+            }}
+            onSubmit={doCreate}
+            focus={passField === 'repeat'}
+            mask
+            error={repeatError}
+            placeholder="same passphrase again"
+          />
         </Box>
-        <Text dimColor>⏎ to create · esc cancel</Text>
-      </Box>
+      </Box>,
     );
   }
 
   if (mode === 'create-show' && mnemonic) {
     return (
-      <Box flexDirection="column">
-        <Text bold color="yellow">
-          Write down these 24 words and store them offline — shown once.
-        </Text>
-        <Box flexDirection="column" marginTop={1}>
-          <MnemonicGrid words={mnemonic} />
+      <>
+        <Box
+          display={confirmSaved ? 'none' : 'flex'}
+          flexDirection="column"
+          flexGrow={viewport.isFullscreen ? 1 : undefined}
+          justifyContent="center"
+          alignItems="center"
+        >
+          {/* The 24 words sit right under the title: on a too-short terminal the
+              shell clips this panel from the BOTTOM, so the words must never be
+              what gets cut off. */}
+          <Panel
+            tone="warning"
+            width={Math.min(72, viewport.contentWidth)}
+            title="Your recovery phrase — shown once"
+          >
+            <Box flexDirection="column" marginTop={1}>
+              <MnemonicGrid words={mnemonic} columns={viewport.contentWidth >= 58 ? 3 : 2} />
+            </Box>
+            <Box marginTop={1}>
+              <Text>
+                <Text dimColor>Wallet </Text>
+                <Text color={color.success}>{address}</Text>
+              </Text>
+            </Box>
+            <Box flexDirection="column" marginTop={1}>
+              <Text color={color.warning}>
+                ⚠ Write these 24 words on paper, in order. Anyone who has them controls your
+                funds. They are never shown again and never stored by tonsole.
+              </Text>
+            </Box>
+            <Box marginTop={1}>
+              <Text>
+                <Text color={color.accent}>⏎</Text>
+                <Text dimColor> I have written them down</Text>
+              </Text>
+            </Box>
+          </Panel>
         </Box>
-        <Box marginTop={1}>
-          <Text color="green">Wallet: {address}</Text>
-        </Box>
-        <Text dimColor>enter when you've saved them</Text>
-      </Box>
+        {confirmSaved ? (
+          <CenteredModal
+            title="Are you sure?"
+            tone="warning"
+            width={56}
+            bindings={[
+              { key: 'y', label: 'yes, continue', onPress: () => onDone() },
+              { key: 'n', label: 'show the phrase again', onPress: () => setConfirmSaved(false) },
+              { key: 'esc', onPress: () => setConfirmSaved(false) },
+            ]}
+            footer={<ConfirmBar verb="continue" cancelLabel="show the phrase again" />}
+          >
+            <Box marginTop={1}>
+              <Text>The 24 words will not be shown again. Did you write them down?</Text>
+            </Box>
+          </CenteredModal>
+        ) : null}
+      </>
     );
   }
 
-  return (
-    <Box flexDirection="column">
-      <Text bold>Import wallet</Text>
-      <Box marginTop={1} flexDirection="column">
-        <TextField
-          label="Phrase"
-          value={mnemonicInput}
-          onChange={setMnemonicInput}
-          focus={importField === 'mnemonic'}
-          onSubmit={() => setImportField('pass')}
-          placeholder="your 24 words"
-        />
-        <TextField
-          label="Pass  "
-          value={pass}
-          onChange={setPass}
-          focus={importField === 'pass'}
-          onSubmit={doImport}
-          mask
-          placeholder="keystore passphrase"
-        />
-      </Box>
-      <Text dimColor>⏎ next · ⏎ on passphrase to import · esc cancel</Text>
-    </Box>
+  const words = wordCount(mnemonicInput);
+  return card(
+    'Import wallet',
+    `Import ▸ 1 recovery phrase ${symbol.bullet} 2 passphrase`,
+    <Box flexDirection="column" marginTop={1}>
+      <TextField
+        label="Phrase"
+        value={mnemonicInput}
+        onChange={(v) => {
+          setMnemonicInput(v);
+          setMnemonicError(null);
+        }}
+        onSubmit={() => setImportField('pass')}
+        focus={importField === 'mnemonic'}
+        placeholder="your 24 words — paste is fine"
+        error={mnemonicError}
+        helper={words > 0 ? `${words}/24 words` : 'space-separated, in order'}
+        width={Math.min(48, Math.max(16, viewport.contentWidth - 24))}
+      />
+      <TextField
+        label="Passphrase"
+        value={pass}
+        onChange={(v) => {
+          setPass(v);
+          setPassError(null);
+        }}
+        onSubmit={doImport}
+        focus={importField === 'pass'}
+        mask
+        error={passError}
+        helper="encrypts the keystore on this machine (min 8 characters)"
+      />
+    </Box>,
   );
 }
 
-function MnemonicGrid({ words }: { words: string[] }) {
+function MnemonicGrid({ words, columns }: { words: string[]; columns: 2 | 3 }) {
+  const perColumn = Math.ceil(words.length / columns);
   const rows = [];
-  for (let r = 0; r < 12; r++) {
-    const left = words[r] ?? '';
-    const right = words[r + 12] ?? '';
-    rows.push(
-      <Text key={r}>
-        <Text dimColor>{`${String(r + 1).padStart(2)}. `}</Text>
-        {left.padEnd(14)}
-        <Text dimColor>{`${String(r + 13).padStart(2)}. `}</Text>
-        {right}
-      </Text>,
-    );
+  for (let r = 0; r < perColumn; r++) {
+    const cells = [];
+    for (let c = 0; c < columns; c++) {
+      const i = c * perColumn + r;
+      const word = words[i];
+      if (word === undefined) continue;
+      cells.push(
+        <Text key={c}>
+          <Text dimColor>{`${String(i + 1).padStart(2)}. `}</Text>
+          <Text bold>{word.padEnd(columns === 3 ? 12 : 14)}</Text>
+        </Text>,
+      );
+    }
+    rows.push(<Text key={r}>{cells}</Text>);
   }
   return <>{rows}</>;
 }

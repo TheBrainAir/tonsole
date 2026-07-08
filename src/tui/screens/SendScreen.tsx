@@ -1,15 +1,22 @@
-import { Box, Text, useInput } from 'ink';
-import { useRef, useState } from 'react';
-import { isDnsName, isValidAddress } from '../../domain/address.js';
-import { formatCoin, parseTon } from '../../domain/amount.js';
+import { Box, Text } from 'ink';
+import { useEffect, useRef, useState } from 'react';
+import { isDnsName, isValidAddress, sameAddress } from '../../domain/address.js';
+import { formatAmount, formatCoin, parseAmount, parseTon } from '../../domain/amount.js';
 import { AppError } from '../../engine/errors.js';
 import type { AccountRef, TxPreview } from '../../engine/types.js';
 import { SecretString } from '../../secrets/secret-string.js';
 import type { SentResult } from '../../services/TransferService.js';
+import { CenteredModal, ConfirmBar } from '../components/Modal.js';
+import { Panel } from '../components/Panel.js';
+import { Spinner } from '../components/Spinner.js';
 import { TextField } from '../components/TextField.js';
 import { TxSummary } from '../components/TxSummary.js';
-import { ErrorBox } from '../components/ui.js';
 import { useApp } from '../context.js';
+import { useAsync } from '../hooks/useAsync.js';
+import { useKeymap } from '../shell/keymap.js';
+import { openUrl } from '../../shared/system.js';
+import { useViewport } from '../shell/viewport.js';
+import { color } from '../theme.js';
 
 /** What is being sent — set when arriving from the Jettons/NFT screens. */
 export type SendPreset =
@@ -29,6 +36,7 @@ export function SendScreen({
   preset?: SendPreset | null;
 }) {
   const app = useApp();
+  const viewport = useViewport();
   const isNft = preset?.kind === 'nft';
   const isJetton = preset?.kind === 'jetton';
   const assetLabel = isNft
@@ -37,9 +45,12 @@ export function SendScreen({
       ? (preset.symbol ?? 'jetton')
       : 'GRAM';
 
+  const fields: Field[] = isNft ? ['to', 'comment', 'pass'] : ['to', 'amount', 'comment', 'pass'];
   const [field, setField] = useState<Field>('to');
   const [to, setTo] = useState('');
+  const [toError, setToError] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
+  const [amountError, setAmountError] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const [pass, setPass] = useState('');
   const [phase, setPhase] = useState<Phase>('form');
@@ -48,20 +59,76 @@ export function SendScreen({
   const [error, setError] = useState<Error | null>(null);
   const resolverRef = useRef<((ok: boolean) => void) | null>(null);
 
+  // What is available to send — shown above the form.
+  const available = useAsync(async () => {
+    if (isNft) return null;
+    if (isJetton) {
+      const all = await app.balances.getJettons(account);
+      const match = all.find((j) => sameAddress(j.master, preset.master));
+      return match ? `${formatAmount(match.amount, match.decimals)} ${assetLabel}` : null;
+    }
+    const ton = await app.balances.getTon(account);
+    return formatCoin(ton.nano);
+  }, [account.address]);
+
   const fail = (e: unknown) => {
     setError(e instanceof Error ? e : new Error(String(e)));
     setPhase('error');
   };
 
-  const submit = () => {
+  // If this screen unmounts mid-confirmation (e.g. the user leaves), resolve the
+  // outstanding confirm as "declined" so the engine's withMnemonic saga settles
+  // and its `.finally(() => passphrase.destroy())` runs — otherwise the decrypted
+  // mnemonic and passphrase would be pinned in memory indefinitely (M6).
+  useEffect(
+    () => () => {
+      resolverRef.current?.(false);
+      resolverRef.current = null;
+    },
+    [],
+  );
+
+  const declineConfirm = () => {
+    resolverRef.current?.(false);
+    resolverRef.current = null;
+  };
+
+  const validateTo = (): boolean => {
     if (!isValidAddress(to) && !isDnsName(to)) {
-      fail(new AppError('InvalidAddress', `Invalid recipient (address or .ton name): "${to}"`));
-      return;
+      setToError('not a TON address or .ton name');
+      setField('to');
+      return false;
     }
-    if (!isNft && amount.trim() === '') {
+    setToError(null);
+    return true;
+  };
+
+  const validateAmount = (): boolean => {
+    if (isNft) return true;
+    const trimmed = amount.trim();
+    if (trimmed === '') {
+      setAmountError('enter an amount');
       setField('amount');
-      return;
+      return false;
     }
+    if (!isJetton && /^(max|all)$/i.test(trimmed)) {
+      setAmountError(null);
+      return true;
+    }
+    try {
+      if (isJetton) parseAmount(trimmed, preset.decimals);
+      else parseTon(trimmed);
+      setAmountError(null);
+      return true;
+    } catch {
+      setAmountError(isJetton ? `not a valid ${assetLabel} amount` : 'not a valid GRAM amount');
+      setField('amount');
+      return false;
+    }
+  };
+
+  const submit = () => {
+    if (!validateTo() || !validateAmount()) return;
     if (pass.length === 0) {
       setField('pass');
       return;
@@ -69,6 +136,7 @@ export function SendScreen({
 
     setPhase('working');
     const passphrase = new SecretString(pass);
+    setPass(''); // don't keep the plaintext passphrase in React state past capture
     const comm = comment.trim() || undefined;
     const confirm = (p: TxPreview): Promise<boolean> =>
       new Promise((resolve) => {
@@ -106,102 +174,189 @@ export function SendScreen({
       .finally(() => passphrase.destroy());
   };
 
-  useInput(
-    (input, key) => {
-      if (phase === 'confirm') {
-        if (input === 'y') {
-          setPhase('broadcasting');
-          resolverRef.current?.(true);
-          resolverRef.current = null;
-        } else if (input === 'n' || key.escape) {
-          resolverRef.current?.(false);
-          resolverRef.current = null;
-        }
-      } else if ((phase === 'done' || phase === 'error') && key.return) {
-        onDone();
-      }
-    },
-    { isActive: phase === 'confirm' || phase === 'done' || phase === 'error' },
+  const move = (dir: 1 | -1) => {
+    const i = fields.indexOf(field);
+    setField(fields[Math.max(0, Math.min(fields.length - 1, i + dir))]!);
+  };
+  const advance = () => {
+    // Enter validates the field it leaves, so mistakes surface immediately.
+    if (field === 'to' && !validateTo()) return;
+    if (field === 'amount' && !validateAmount()) return;
+    if (field === 'pass') {
+      submit();
+      return;
+    }
+    move(1);
+  };
+
+  useKeymap(
+    'screen',
+    [
+      { key: '⏎', label: field === 'pass' ? 'send' : 'next' },
+      { key: 'tab', label: 'move', onPress: () => move(1) },
+      { key: '↑', match: (_i, k) => k.upArrow, onPress: () => move(-1) },
+      { key: '↓', match: (_i, k) => k.downArrow, onPress: () => move(1) },
+    ],
+    { isActive: phase === 'form' },
   );
 
   if (phase === 'error' && error) {
     return (
-      <Box flexDirection="column">
-        <ErrorBox error={error} />
-        <Text dimColor>enter to go back</Text>
-      </Box>
+      <CenteredModal
+        title="Could not send"
+        tone="danger"
+        bindings={[
+          { key: 'r', label: 'try again', onPress: () => setPhase('form') },
+          { key: '⏎', onPress: () => setPhase('form') },
+          { key: 'esc', label: 'back', onPress: () => onDone() },
+        ]}
+      >
+        <Box marginTop={1} flexDirection="column">
+          <Text>{error.message}</Text>
+          <Box marginTop={1}>
+            <Text dimColor>Your form is kept — r edits and retries.</Text>
+          </Box>
+        </Box>
+      </CenteredModal>
     );
   }
+
   if (phase === 'done') {
     return (
-      <Box flexDirection="column">
-        <Text color="green" bold>
-          ✓ Sent {sentLabel(preset, amount)}
-        </Text>
-        {result?.explorerUrl ? <Text dimColor>{result.explorerUrl}</Text> : null}
-        <Text dimColor>enter to go back</Text>
-      </Box>
+      <CenteredModal
+        title={`✓ Sent ${sentLabel(preset, amount)}`}
+        tone="success"
+        bindings={[
+          { key: '⏎', label: 'done', onPress: () => onDone() },
+          ...(result?.explorerUrl
+            ? [{ key: 'o', label: 'open in explorer', onPress: () => void openUrl(result.explorerUrl!) }]
+            : []),
+        ]}
+      >
+        {result?.explorerUrl ? (
+          <Box marginTop={1}>
+            <Text dimColor wrap="truncate-middle">
+              {result.explorerUrl}
+            </Text>
+          </Box>
+        ) : null}
+      </CenteredModal>
     );
   }
+
   if (phase === 'working' || phase === 'broadcasting') {
-    return <Text dimColor>{phase === 'working' ? 'emulating…' : 'broadcasting…'}</Text>;
+    return (
+      <CenteredModal title={`Send ${assetLabel}`} bindings={[]}>
+        <Box marginTop={1}>
+          <Spinner
+            label={phase === 'working' ? 'emulating the transaction…' : 'broadcasting…'}
+          />
+        </Box>
+      </CenteredModal>
+    );
   }
+
   if (phase === 'confirm' && preview) {
     return (
-      <Box flexDirection="column">
-        <TxSummary preview={preview} />
-        <Box marginTop={1}>
+      <CenteredModal
+        width={76}
+        bindings={[
+          {
+            key: 'y',
+            label: 'send',
+            onPress: () => {
+              setPhase('broadcasting');
+              resolverRef.current?.(true);
+              resolverRef.current = null;
+            },
+          },
+          { key: 'n', label: 'cancel', onPress: declineConfirm },
+          { key: 'esc', onPress: declineConfirm },
+        ]}
+        // A dApp prompt appearing over this confirm must settle the signing saga
+        // (frees the decrypted mnemonic); the form values survive.
+        onMasked={declineConfirm}
+        footer={
           <Text>
-            Send {assetLabel}? <Text color="cyan">[y/N]</Text>
+            Send {assetLabel}? <ConfirmBar verb="send" />
           </Text>
-        </Box>
-      </Box>
+        }
+      >
+        <TxSummary preview={preview} />
+      </CenteredModal>
     );
   }
 
   return (
-    <Box flexDirection="column">
-      <Text bold>Send {assetLabel}</Text>
-      <Box marginTop={1} flexDirection="column">
-        <TextField
-          label="To     "
-          value={to}
-          onChange={setTo}
-          focus={field === 'to'}
-          onSubmit={() => setField(isNft ? 'comment' : 'amount')}
-          placeholder="address or name.ton"
-        />
-        {!isNft ? (
+    <Box
+      flexDirection="column"
+      flexGrow={viewport.isFullscreen ? 1 : undefined}
+      justifyContent="center"
+      alignItems="center"
+    >
+      <Panel width={Math.min(68, viewport.contentWidth)} title={`Send ${assetLabel}`}>
+        <Box marginTop={1}>
+          <Box width={14} flexShrink={0}>
+            <Text dimColor>Available</Text>
+          </Box>
+          {available.loading ? (
+            <Spinner label="" />
+          ) : available.data ? (
+            <Text color={color.success}>{available.data}</Text>
+          ) : (
+            <Text dimColor>—</Text>
+          )}
+        </Box>
+        <Box marginTop={1} flexDirection="column">
           <TextField
-            label="Amount "
-            value={amount}
-            onChange={setAmount}
-            focus={field === 'amount'}
-            onSubmit={() => setField('comment')}
-            placeholder={isJetton ? `${assetLabel}, e.g. 10.5` : "GRAM, e.g. 1.5 or 'max'"}
+            label="To"
+            value={to}
+            onChange={(v) => {
+              setTo(v);
+              setToError(null);
+            }}
+            focus={field === 'to'}
+            onSubmit={advance}
+            placeholder="address or name.ton"
+            error={toError}
+            // 48 = panel 68 − borders/padding 4 − label 14 − cursor cell − slack
+            width={Math.min(48, Math.max(16, viewport.contentWidth - 24))}
           />
-        ) : null}
-        <TextField
-          label="Comment"
-          value={comment}
-          onChange={setComment}
-          focus={field === 'comment'}
-          onSubmit={() => setField('pass')}
-          placeholder="optional memo"
-        />
-        <TextField
-          label="Pass   "
-          value={pass}
-          onChange={setPass}
-          focus={field === 'pass'}
-          onSubmit={submit}
-          mask
-          placeholder="keystore passphrase"
-        />
-      </Box>
-      <Box marginTop={1}>
-        <Text dimColor>⏎ next field · ⏎ on passphrase to send · esc cancel</Text>
-      </Box>
+          {!isNft ? (
+            <TextField
+              label="Amount"
+              value={amount}
+              onChange={(v) => {
+                setAmount(v);
+                setAmountError(null);
+              }}
+              focus={field === 'amount'}
+              onSubmit={advance}
+              placeholder={isJetton ? `${assetLabel}, e.g. 10.5` : 'GRAM, e.g. 1.5'}
+              error={amountError}
+              helper={isJetton ? undefined : "type 'max' to send everything"}
+            />
+          ) : null}
+          <TextField
+            label="Comment"
+            value={comment}
+            onChange={setComment}
+            focus={field === 'comment'}
+            onSubmit={advance}
+            placeholder="optional memo"
+          />
+          <TextField
+            label="Passphrase"
+            value={pass}
+            onChange={setPass}
+            focus={field === 'pass'}
+            onSubmit={advance}
+            mask
+            placeholder="keystore passphrase"
+            helper="you will confirm an emulated preview before anything is sent"
+          />
+        </Box>
+      </Panel>
     </Box>
   );
 }
