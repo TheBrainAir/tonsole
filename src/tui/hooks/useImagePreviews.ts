@@ -5,6 +5,14 @@ import { renderImagePreview } from '../../shared/image.js';
 // re-selection. Value `string` = rendered blocks, `null` = failed/unsupported.
 const cache = new Map<string, string | null>();
 const inFlight = new Set<string>();
+// Every mounted hook instance, notified whenever ANY image finishes: an
+// instance that mounts while a render is already in flight (screen re-entered)
+// must still re-render on completion, and thumbnails appear progressively
+// instead of after the whole batch settles.
+const subscribers = new Set<() => void>();
+const notify = () => {
+  for (const bump of [...subscribers]) bump();
+};
 const keyOf = (url: string, w: number, h: number) => `${w}x${h}|${url}`;
 
 /**
@@ -20,25 +28,28 @@ export function useImagePreviews(
   const wanted = urls.filter((u): u is string => typeof u === 'string' && u.length > 0);
 
   useEffect(() => {
+    subscribers.add(bump);
+    return () => {
+      subscribers.delete(bump);
+    };
+  }, []);
+
+  useEffect(() => {
     const todo = wanted.filter((u) => {
       const k = keyOf(u, width, height);
       return !cache.has(k) && !inFlight.has(k);
     });
-    if (todo.length === 0) return;
-    let active = true;
-    todo.forEach((u) => inFlight.add(keyOf(u, width, height)));
-    void Promise.all(
-      todo.map(async (u) => {
-        const k = keyOf(u, width, height);
-        cache.set(k, await renderImagePreview(u, { width, height }));
-        inFlight.delete(k);
-      }),
-    ).then(() => {
-      if (active) bump();
-    });
-    return () => {
-      active = false;
-    };
+    for (const u of todo) {
+      const k = keyOf(u, width, height);
+      inFlight.add(k);
+      renderImagePreview(u, { width, height })
+        .then((blocks) => cache.set(k, blocks))
+        .catch(() => cache.set(k, null))
+        .finally(() => {
+          inFlight.delete(k);
+          notify();
+        });
+    }
   }, [wanted.join('|'), width, height]);
 
   return (url?: string) => (url ? (cache.get(keyOf(url, width, height)) ?? null) : null);
