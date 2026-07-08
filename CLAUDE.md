@@ -30,8 +30,8 @@ npx vitest run src/domain/amount.test.ts
 npx vitest run -t "parses 1.5 TON"
 ```
 
-Testnet integration tests are opt-in and gated behind `TONSOLE_TEST_TESTNET=1` (they hit a real
-faucet/testnet; never run them against mainnet, never use a real key).
+Manual end-to-end checks run against **testnet** (never mainnet, never a real key). There is no
+automated testnet integration suite yet.
 
 ## Critical gotcha: how `@ton/walletkit` loads
 
@@ -160,8 +160,9 @@ history ✅ → M3 jettons ✅ → **M4 full Ink TUI = v1 ✅** → M5 TON Conne
 The `tonsole` bin + tsup bundle are publishable (`npm i -g tonsole`); the actual npm publish is the user's call.
 The TUI launches on `tonsole` with no args (a real TTY); CLI subcommands otherwise. `src/tui/run.tsx` is a
 dynamic import so CLI commands don't load Ink.
-Default wallet contract is **W5 (v5r1)**; v4r2 is supported for import. Network defaults to **testnet** on
-first run. The full plan lives at `~/.claude/plans/mighty-singing-cloud.md`.
+Default wallet contract is **W5 (v5r1)**; v4r2, v3r2 and v3r1 are selectable at create/import (CLI
+`--contract`, TUI picker). v3 wallets send/receive but have no TON Connect (a WalletKit limit). Network
+defaults to **testnet** on first run.
 
 ## Packaging note
 

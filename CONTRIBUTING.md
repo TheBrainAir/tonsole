@@ -22,8 +22,8 @@ npm run lint        # eslint (also enforces the architecture import boundary)
 npm test            # vitest
 ```
 
-Testnet integration tests are opt-in and gated behind `TONSOLE_TEST_TESTNET=1`. Never run them against
-mainnet and never use a real key.
+When testing wallet flows manually, use **testnet** (the default on first run) — never mainnet, and never
+a recovery phrase that holds real funds.
 
 ## Pull requests
 

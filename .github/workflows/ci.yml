@@ -22,3 +22,8 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      # The build is the riskiest step (tsup must bundle the broken @ton/walletkit
+      # ESM); make sure a broken bundle can never reach npm.
+      - run: npm run build
+      - run: node dist/index.js --help
+      - run: npm pack --dry-run
