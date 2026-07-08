@@ -89,7 +89,9 @@ export function registerSendCommand(program: Command): void {
         }
       } catch (error) {
         if (AppError.is(error, 'Cancelled')) {
-          info('Cancelled — nothing was sent.');
+          // In --json mode notices go to stderr so the JSON stream stays parseable.
+          if (globals.json) process.stderr.write(`tonsole: ${error.message}\n`);
+          else info('Cancelled — nothing was sent.');
           return;
         }
         throw error;
@@ -103,6 +105,10 @@ function makeConfirm(json: boolean, yes: boolean): (preview: TxPreview) => Promi
   return async (preview) => {
     if (!json) renderPreview(preview);
     if (yes) return true;
+    if (json) {
+      // Prompting on stdout would corrupt the JSON a caller is parsing — require --yes.
+      throw new AppError('Cancelled', 'Refusing to send in --json mode without --yes.');
+    }
     if (process.stdin.isTTY !== true) {
       throw new AppError('Cancelled', 'Refusing to send without --yes in a non-interactive shell.');
     }
@@ -125,9 +131,11 @@ function who(d: AssetDelta): string {
 function renderPreview(preview: TxPreview): void {
   info();
   info(
-    preview.ok
-      ? chalk.green.bold('✓ If you sign, this happens:')
-      : chalk.red.bold('✗ This would FAIL — nothing will be sent'),
+    !preview.emulated
+      ? chalk.yellow.bold('⚠ This transaction could NOT be simulated — its effects are unknown.')
+      : preview.ok
+        ? chalk.green.bold('✓ If you sign, this happens:')
+        : chalk.red.bold('✗ This would FAIL — nothing will be sent'),
   );
   for (const d of preview.moneyFlow.outgoing) {
     info(`  ${chalk.red('−')} ${deltaText(d)}  → ${chalk.dim(who(d))}`);

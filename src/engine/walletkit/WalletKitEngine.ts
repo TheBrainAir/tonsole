@@ -2,6 +2,7 @@ import { Address } from '@ton/core';
 import { TonClient } from '@ton/ton';
 import { normalizeRecipient, parseAddress, sameAddress, toFriendly, toRaw } from '../../domain/address.js';
 import { generateMnemonic, validateMnemonic } from '../../domain/mnemonic.js';
+import { sanitizeOptional, sanitizeText } from '../../domain/sanitize.js';
 import { AppError } from '../errors.js';
 import type { CreateOpts, SigningContext, TonConnect, WalletEngine } from '../WalletEngine.js';
 import type {
@@ -10,6 +11,8 @@ import type {
   AssetDelta,
   Balance,
   ConnectRequest,
+  ConnectTxMessage,
+  ConnectTxRequest,
   HistoryItem,
   JettonBalance,
   NetworkId,
@@ -22,6 +25,57 @@ import type {
   UnsignedTransfer,
 } from '../types.js';
 import { normalizeStoredEvent } from './tonconnect-normalize.js';
+
+/** Jetton display metadata, resolved on demand for the TON Connect preview. */
+export interface JettonMetaResolver {
+  (master: string): Promise<{ decimals: number; symbol?: string } | undefined>;
+}
+
+/** Parse a provider-supplied amount to bigint without throwing (0n on junk). */
+function toBigIntSafe(v: string | number | undefined | null): bigint {
+  if (v === undefined || v === null) return 0n;
+  try {
+    if (typeof v === 'number') return Number.isFinite(v) ? BigInt(Math.trunc(v)) : 0n;
+    const s = v.trim();
+    return /^-?\d+$/.test(s) ? BigInt(s) : 0n;
+  } catch {
+    return 0n;
+  }
+}
+
+/** Reject a hung RPC call after `ms` so the UI shows a retriable error, not a spinner forever. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new AppError('NetworkUnavailable', `${label} timed out after ${Math.round(ms / 1000)}s.`));
+    }, ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
+const RPC_TIMEOUT_MS = 20_000;
+/** Longer cap for broadcast — exceeds one WalletKit send attempt (~30s) before we
+ *  surface the honest "may have been submitted" message. */
+const BROADCAST_TIMEOUT_MS = 40_000;
+/** Short cap for the best-effort jetton-metadata lookup on the approval hot-path. */
+const METADATA_TIMEOUT_MS = 6_000;
+
+/** TON network chain ids per the TON Connect / walletkit convention. */
+const CHAIN_ID: Record<NetworkId, string> = { mainnet: '-239', testnet: '-3' };
+function networkIdFromChainId(chainId: string | undefined): NetworkId | undefined {
+  if (chainId === CHAIN_ID.mainnet) return 'mainnet';
+  if (chainId === CHAIN_ID.testnet) return 'testnet';
+  return undefined;
+}
 
 /** Structural subset of WalletKit's TransactionEmulatedPreview that we consume. */
 interface RawTransfer {
@@ -46,6 +100,24 @@ interface RawEmulatedPreview {
   trace?: {
     transactions?: Record<string, RawTraceTx>;
     addressBook?: Record<string, RawAddressBookEntry>;
+  };
+}
+
+/** Structural subset of WalletKit's SendTransactionRequestEvent that we consume. */
+interface RawTxRequestMessage {
+  address?: string;
+  amount?: string;
+  payload?: string;
+  stateInit?: string;
+}
+interface RawTxRequestEvent {
+  id: string;
+  walletAddress?: string;
+  preview: { data?: RawEmulatedPreview };
+  request?: {
+    messages?: RawTxRequestMessage[];
+    network?: { chainId?: string };
+    validUntil?: number;
   };
 }
 
@@ -74,8 +146,11 @@ function lookupName(
 }
 
 function extractErrorMessage(error: unknown): string {
+  // The emulator's error message is free-form and can echo attacker/on-chain text;
+  // it is rendered on the approval surface, so sanitize it like any untrusted string.
   if (error && typeof error === 'object' && 'message' in error) {
-    return String((error as { message?: unknown }).message ?? 'emulation error');
+    const cleaned = sanitizeText(String((error as { message?: unknown }).message ?? ''), { maxLen: 200 });
+    return cleaned === '' ? 'Transaction emulation failed.' : cleaned;
   }
   return 'Transaction emulation failed.';
 }
@@ -85,56 +160,75 @@ function describeRequestError(event: unknown): string {
   return e?.error?.message ?? e?.message ?? 'TON Connect request error';
 }
 
-/** Map a WalletKit emulated preview into our engine-agnostic TxPreview. */
+interface JettonDisplayMeta {
+  decimals: number;
+  symbol?: string;
+}
+
+/**
+ * Map a WalletKit emulated preview into our engine-agnostic TxPreview.
+ *
+ * `preview` may be undefined/empty when the dApp transaction could not be
+ * emulated — in that case `emulated` is false and the UI must warn rather than
+ * present an empty money-flow as a safe "no change".
+ */
 function mapEmulatedPreview(
-  preview: RawEmulatedPreview,
+  preview: RawEmulatedPreview | undefined,
   ourAddress: string,
-  decimalsFor: (jettonMaster: string) => number,
+  metaFor: (jettonMaster: string) => JettonDisplayMeta,
 ): TxPreview {
-  const book = preview.trace?.addressBook;
+  const p = preview ?? {};
+  const emulated =
+    p.result !== undefined ||
+    (p.error !== undefined && p.error !== null) ||
+    p.moneyFlow !== undefined ||
+    p.trace !== undefined;
+
+  const book = p.trace?.addressBook;
   const outgoing: AssetDelta[] = [];
   const incoming: AssetDelta[] = [];
-  for (const item of preview.moneyFlow?.ourTransfers ?? []) {
-    const amount = BigInt(item.amount);
+  for (const item of p.moneyFlow?.ourTransfers ?? []) {
+    const amount = toBigIntSafe(item.amount);
     const isOut = item.fromAddress !== undefined && sameAddress(item.fromAddress, ourAddress);
     const type = assetTypeOf(item);
-    const asset: Asset =
-      type === 'ton'
-        ? 'TON'
-        : { jettonMaster: item.tokenAddress ?? '', decimals: type === 'nft' ? 0 : decimalsFor(item.tokenAddress ?? '') };
+    let asset: Asset;
+    if (type === 'ton') {
+      asset = 'TON';
+    } else if (type === 'nft') {
+      asset = { jettonMaster: item.tokenAddress ?? '', decimals: 0 };
+    } else {
+      const meta = metaFor(item.tokenAddress ?? '');
+      asset = { jettonMaster: item.tokenAddress ?? '', decimals: meta.decimals, symbol: meta.symbol };
+    }
     const counterparty = isOut ? item.toAddress : item.fromAddress;
     (isOut ? outgoing : incoming).push({
       asset,
       amount: isOut ? -amount : amount,
       counterparty,
-      counterpartyName: lookupName(counterparty, book),
+      counterpartyName: sanitizeOptional(lookupName(counterparty, book), { maxLen: 64 }),
       assetType: type,
     });
   }
 
   let feeTotal = 0n;
   let exitCode: number | undefined;
-  for (const tx of Object.values(preview.trace?.transactions ?? {})) {
-    if (tx.totalFees) {
-      try {
-        feeTotal += BigInt(tx.totalFees);
-      } catch {
-        // ignore unparseable fee
-      }
-    }
+  for (const tx of Object.values(p.trace?.transactions ?? {})) {
+    if (tx.totalFees) feeTotal += toBigIntSafe(tx.totalFees);
     const ec = tx.description?.computePhase?.exitCode;
     if (exitCode === undefined && typeof ec === 'number' && ec !== 0) exitCode = ec;
   }
 
-  const failed = preview.result === 'failure' || (preview.error !== undefined && preview.error !== null);
+  const failed = p.result === 'failure' || (p.error !== undefined && p.error !== null);
   return {
-    ok: !failed,
+    // An un-emulated tx is neither "ok" nor "failed": ok is meaningful only when emulated.
+    ok: emulated && !failed,
+    emulated,
     moneyFlow: { outgoing, incoming },
     estimatedFees: feeTotal > 0n ? { gas: 0n, forward: 0n, storage: 0n, total: feeTotal } : undefined,
     willDeployWallet: false,
-    warnings: failed ? [extractErrorMessage(preview.error)] : [],
+    warnings: failed ? [extractErrorMessage(p.error)] : [],
     exitCode,
-    raw: preview,
+    raw: p,
   };
 }
 
@@ -163,6 +257,9 @@ export interface WalletKitEngineDeps {
   network: NetworkId;
   toncenterUrl: string;
   toncenterKey?: string;
+  /** Optional jetton-metadata resolver so the TON Connect preview can show real
+   *  decimals/symbol instead of a hardcoded 9. Wired from the composition root. */
+  resolveJettonMeta?: JettonMetaResolver;
 }
 
 /**
@@ -262,7 +359,11 @@ export class WalletKitEngine implements WalletEngine {
 
   async getBalance(acct: AccountRef): Promise<Balance> {
     const client = this.#requireClient();
-    const nano = await client.getBalance(Address.parse(acct.rawAddress));
+    const nano = await withTimeout(
+      client.getBalance(Address.parse(acct.rawAddress)),
+      RPC_TIMEOUT_MS,
+      'Balance lookup',
+    );
     return { nano, decimals: 9 };
   }
 
@@ -335,7 +436,12 @@ export class WalletKitEngine implements WalletEngine {
                 ...comment,
               });
 
-      const preview = this.#mapPreview(await wallet.getTransactionPreview(request), acct, intent);
+      const rawPreview = await withTimeout(
+        wallet.getTransactionPreview(request),
+        RPC_TIMEOUT_MS,
+        'Transaction emulation',
+      );
+      const preview = this.#mapPreview(rawPreview, acct, intent);
       if (!preview.ok) {
         throw new AppError('EmulationFailed', preview.warnings[0] ?? 'Transaction emulation failed.', {
           details: { warnings: preview.warnings },
@@ -345,7 +451,23 @@ export class WalletKitEngine implements WalletEngine {
         throw new AppError('Cancelled', 'Transfer cancelled.');
       }
 
-      const sent = await wallet.sendTransaction(request);
+      // Broadcast can't be safely cancelled — WalletKit may already have delivered the
+      // message to the node when our cap fires. Use a longer cap and, on timeout, say
+      // the tx MAY have been submitted (TON external messages are seqno-idempotent, so a
+      // later retry cannot double-spend) rather than implying it failed.
+      const sent = await withTimeout(
+        wallet.sendTransaction(request),
+        BROADCAST_TIMEOUT_MS,
+        'Broadcast',
+      ).catch((e: unknown) => {
+        if (AppError.is(e, 'NetworkUnavailable') && e.message.includes('timed out')) {
+          throw new AppError(
+            'NetworkUnavailable',
+            'The network is slow to accept the broadcast. Your transaction MAY already have been submitted — check your history before retrying.',
+          );
+        }
+        throw e;
+      });
       return { hash: sent.normalizedHash, status: 'submitted' };
     });
   }
@@ -379,9 +501,80 @@ export class WalletKitEngine implements WalletEngine {
   }
 
   #mapPreview(preview: RawEmulatedPreview, acct: AccountRef, intent: TransferIntent): TxPreview {
-    return mapEmulatedPreview(preview, acct.address, (master) =>
-      intent.kind === 'jetton' && sameAddress(master, intent.jettonMaster) ? intent.decimals : 9,
-    );
+    return mapEmulatedPreview(preview, acct.address, (master) => ({
+      decimals: intent.kind === 'jetton' && sameAddress(master, intent.jettonMaster) ? intent.decimals : 9,
+    }));
+  }
+
+  /**
+   * Build the engine-agnostic dApp transaction request: resolve real jetton
+   * decimals/symbol for the preview, extract the exact messages being signed, and
+   * flag a network mismatch — so the approval prompt can never present a false or
+   * un-simulated picture of what the user is about to sign.
+   */
+  async #buildConnectTxRequest(rawEvent: unknown): Promise<ConnectTxRequest> {
+    const event = rawEvent as RawTxRequestEvent;
+    const ourAddress = this.#tcAccount?.address ?? event.walletAddress ?? '';
+    const emulation = event.preview?.data;
+
+    // Resolve display metadata for every jetton in the emulated flow (best-effort).
+    const masters = new Set<string>();
+    for (const item of emulation?.moneyFlow?.ourTransfers ?? []) {
+      if (assetTypeOf(item) === 'jetton' && item.tokenAddress) masters.add(item.tokenAddress);
+    }
+    const metaByMaster = new Map<string, JettonDisplayMeta>();
+    const resolver = this.#deps.resolveJettonMeta;
+    if (resolver && masters.size > 0) {
+      try {
+        // Cap the lookup so a hung/slow indexer can't stall the approval prompt.
+        await withTimeout(
+          Promise.all(
+            [...masters].map(async (master) => {
+              const meta = await resolver(master).catch(() => undefined);
+              if (meta) metaByMaster.set(master, { decimals: meta.decimals, symbol: meta.symbol });
+            }),
+          ),
+          METADATA_TIMEOUT_MS,
+          'Token metadata lookup',
+        );
+      } catch {
+        // Timed out or failed — proceed with whatever resolved; warned below.
+      }
+    }
+    // When a jetton's decimals were guessed (default 9), the amount shown may be wrong.
+    const decimalsGuessed = [...masters].some((m) => !metaByMaster.has(m));
+    const metaFor = (master: string): JettonDisplayMeta => metaByMaster.get(master) ?? { decimals: 9 };
+
+    const preview = mapEmulatedPreview(emulation, ourAddress, metaFor);
+    if (decimalsGuessed) {
+      preview.warnings.push(
+        'Could not verify the decimals/symbol of one or more tokens — the token amounts shown may be inaccurate. Verify with the dApp before approving.',
+      );
+    }
+
+    // The exact messages the dApp asked to sign — shown alongside the emulated flow.
+    const activeNet = this.#tcAccount?.network ?? this.#deps.network;
+    const messages: ConnectTxMessage[] = (event.request?.messages ?? []).map((m) => ({
+      to: sanitizeOptional(String(m.address ?? ''), { maxLen: 70 }) ?? '(unknown)',
+      amount: toBigIntSafe(m.amount),
+      hasPayload: typeof m.payload === 'string' && m.payload.length > 0,
+      hasStateInit: typeof m.stateInit === 'string' && m.stateInit.length > 0,
+    }));
+
+    // Guard against signing on the wrong chain (M2): re-tagging silently would be worse.
+    const reqChainId = event.request?.network?.chainId;
+    const reqNet = networkIdFromChainId(reqChainId);
+    const networkMismatch =
+      reqChainId !== undefined && reqNet !== activeNet
+        ? { requested: reqNet ?? reqChainId, active: activeNet }
+        : undefined;
+    if (networkMismatch) {
+      preview.warnings.push(
+        `This dApp requested the ${networkMismatch.requested} network but your wallet is on ${activeNet}.`,
+      );
+    }
+
+    return { id: event.id, preview, messages, validUntil: event.request?.validUntil, networkMismatch };
   }
 
   tonConnect(): TonConnect {
@@ -413,10 +606,10 @@ export class WalletKitEngine implements WalletEngine {
           if (this.#tcWalletId && !event.walletId) event.walletId = this.#tcWalletId;
           const req: ConnectRequest = {
             id: event.id,
-            dappName: event.preview.dAppInfo?.name,
-            dappUrl: event.preview.dAppInfo?.url,
+            dappName: sanitizeOptional(event.preview.dAppInfo?.name, { maxLen: 64 }),
+            dappUrl: sanitizeOptional(event.preview.dAppInfo?.url, { maxLen: 128 }),
             permissions: event.preview.permissions
-              .map((p) => p.title ?? p.name ?? '')
+              .map((p) => sanitizeOptional(p.title ?? p.name ?? '', { maxLen: 48 }) ?? '')
               .filter((s) => s.length > 0),
           };
           void handler(req)
@@ -430,9 +623,8 @@ export class WalletKitEngine implements WalletEngine {
       onTransactionRequest: (handler) => {
         kit.onTransactionRequest((event) => {
           if (this.#tcWalletId && !event.walletId) event.walletId = this.#tcWalletId;
-          const ourAddress = this.#tcAccount?.address ?? event.walletAddress ?? '';
-          const preview = mapEmulatedPreview(event.preview.data ?? {}, ourAddress, () => 9);
-          void handler({ id: event.id, preview })
+          void this.#buildConnectTxRequest(event)
+            .then((req) => handler(req))
             .then(async (ok) => {
               if (ok) await kit.approveTransactionRequest(event);
               else await kit.rejectTransactionRequest(event, 'Rejected by user');

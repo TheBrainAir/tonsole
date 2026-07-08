@@ -47,7 +47,10 @@ export interface JettonBalance {
   symbol?: string;
   name?: string;
   image?: string;
+  /** True when the indexer whitelists the jetton (kept for compatibility). */
   verified?: boolean;
+  /** Indexer verdict: 'blacklist' means the indexer flags it as a scam. */
+  verification?: 'whitelist' | 'blacklist' | 'none';
 }
 
 /** An NFT item held by an account. */
@@ -117,6 +120,13 @@ export interface FeeBreakdown {
 export interface TxPreview {
   /** True if emulation succeeded (compute phase did not abort). */
   ok: boolean;
+  /**
+   * True only if the provider actually returned emulation data. When false, the
+   * money-flow/fees are UNKNOWN (not "no change") and the UI must warn instead of
+   * showing a reassuring result — a malicious dApp can otherwise submit a tx the
+   * wallet could not simulate and have it rendered as safe.
+   */
+  emulated: boolean;
   moneyFlow: MoneyFlow;
   /** Itemized fees when the provider exposes them; otherwise omitted. */
   estimatedFees?: FeeBreakdown;
@@ -173,10 +183,28 @@ export interface ConnectRequest {
   permissions: string[];
 }
 
+/** One raw outgoing message a dApp asked the wallet to sign. */
+export interface ConnectTxMessage {
+  /** Recipient (friendly form). */
+  to: string;
+  /** GRAM (nanotons) attached to this message. */
+  amount: bigint;
+  /** The message carries a body/payload (a contract call, not a plain transfer). */
+  hasPayload: boolean;
+  /** The message deploys a contract (carries a stateInit). */
+  hasStateInit: boolean;
+}
+
 /** A dApp transaction request with its emulated preview. */
 export interface ConnectTxRequest {
   id: string;
   preview: TxPreview;
+  /** The exact messages the dApp requested — shown so the user sees what they sign. */
+  messages: ConnectTxMessage[];
+  /** Unix seconds after which the request is invalid, if the dApp set one. */
+  validUntil?: number;
+  /** Present when the dApp's requested network differs from the active wallet's. */
+  networkMismatch?: { requested: string; active: NetworkId };
 }
 
 /** An active TON Connect session. */

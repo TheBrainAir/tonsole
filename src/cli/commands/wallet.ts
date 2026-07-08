@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import { buildApp } from '../../composition.js';
 import { AppError } from '../../engine/errors.js';
-import { promptPassphrase, readLine } from '../../secrets/passphrase.js';
+import { promptPassphrase, readLine, readLineSecret } from '../../secrets/passphrase.js';
 import type { WalletVersion } from '../../engine/types.js';
 import { readGlobals } from '../context.js';
 import { info, printJson, renderMnemonic, success, warn } from '../render.js';
@@ -29,7 +29,17 @@ export function registerWalletCommands(program: Command): void {
             version: versionFrom(opts),
           });
           if (globals.json) {
-            printJson({ id, address: account.address, network: account.network, version: account.version, mnemonic });
+            process.stderr.write(
+              'tonsole: WARNING — this JSON contains your recovery phrase in plaintext; store it securely and keep it out of logs/history.\n',
+            );
+            printJson({
+              id,
+              address: account.address,
+              network: account.network,
+              version: account.version,
+              mnemonic,
+              _warning: 'This output contains your secret 24-word recovery phrase.',
+            });
             return;
           }
           info();
@@ -50,13 +60,22 @@ export function registerWalletCommands(program: Command): void {
   wallet
     .command('import')
     .description('Import a wallet from an existing 24-word recovery phrase')
-    .argument('[words...]', 'the 24 words (omit to be prompted on stdin)')
+    .argument('[words...]', 'the 24 words (omit — and enter them at the hidden prompt — to avoid exposing them)')
     .option('--v4', 'use the v4r2 contract instead of the default v5r1 (W5)')
     .action(async (words: string[], opts: { v4?: boolean }, command: Command) => {
       const globals = readGlobals(command);
       const app = await buildApp({ network: globals.network });
       try {
-        const phrase = words.length > 0 ? words.join(' ') : await readLine('Recovery phrase (24 words): ');
+        let phrase: string;
+        if (words.length > 0) {
+          // argv is visible in shell history, `ps`, and /proc/<pid>/cmdline.
+          process.stderr.write(
+            'tonsole: WARNING — passing the recovery phrase as command arguments exposes it in your shell history and process list. Prefer `tonsole wallet import` with no words and enter it at the prompt.\n',
+          );
+          phrase = words.join(' ');
+        } else {
+          phrase = await readLineSecret('Recovery phrase (24 words): ');
+        }
         const passphrase = await promptPassphrase('Set a keystore passphrase: ', {
           confirm: true,
           minLength: 8,

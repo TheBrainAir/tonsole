@@ -18,7 +18,8 @@ export function registerHistoryCommand(program: Command): void {
       const app = await buildApp({ network: globals.network });
       try {
         const acct = resolveAccountArg(app, account);
-        const limit = Number.parseInt(opts.limit, 10) || 20;
+        const parsed = Number.parseInt(opts.limit, 10);
+        const limit = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 100) : 20;
         const page = await app.history.recent(acct, { limit });
 
         if (globals.json) {

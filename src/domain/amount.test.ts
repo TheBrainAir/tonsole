@@ -52,4 +52,10 @@ describe('formatAmount', () => {
   it('can keep trailing zeros when asked', () => {
     expect(formatAmount(1_500_000_000n, 9, { trimTrailingZeros: false })).toBe('1.500000000');
   });
+
+  it('rejects invalid decimals (negative / non-integer / absurd) from bad metadata', () => {
+    expect(() => parseAmount('1', -1)).toThrow();
+    expect(() => parseAmount('1', 1.5)).toThrow();
+    expect(() => parseAmount('1', 1000)).toThrow();
+  });
 });

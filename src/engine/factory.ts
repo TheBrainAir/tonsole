@@ -1,4 +1,5 @@
 import type { EngineChoice } from '../config/schema.js';
+import { AppError } from './errors.js';
 import type { NetworkId } from './types.js';
 import type { WalletEngine } from './WalletEngine.js';
 import { TonCoreEngine } from './toncore/TonCoreEngine.js';
@@ -10,6 +11,8 @@ export interface EngineFactoryDeps {
   toncenterUrl: string;
   toncenterKey?: string;
   logger?: { warn: (message: string) => void };
+  /** Jetton-metadata resolver for the TON Connect preview (WalletKit engine only). */
+  resolveJettonMeta?: (master: string) => Promise<{ decimals: number; symbol?: string } | undefined>;
 }
 
 /**
@@ -22,6 +25,7 @@ export async function createEngine(deps: EngineFactoryDeps): Promise<WalletEngin
     network: deps.network,
     toncenterUrl: deps.toncenterUrl,
     toncenterKey: deps.toncenterKey,
+    resolveJettonMeta: deps.resolveJettonMeta,
   };
 
   if (deps.choice === 'toncore') {
@@ -36,16 +40,20 @@ export async function createEngine(deps: EngineFactoryDeps): Promise<WalletEngin
     return engine;
   }
 
-  // auto
+  // auto: prefer WalletKit. The TonCore engine is currently a stub that throws on
+  // reads/derivation, so a silent fallback would "load" then fail on every action.
+  // Surface the real WalletKit failure instead of degrading to a broken engine.
   const walletkit = new WalletKitEngine(base);
   try {
     await walletkit.init();
     return walletkit;
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
-    deps.logger?.warn(`WalletKit engine unavailable under Node; falling back to TonCore. (${message})`);
-    const fallback = new TonCoreEngine(base);
-    await fallback.init();
-    return fallback;
+    deps.logger?.warn(`WalletKit engine failed to initialize. (${message})`);
+    throw new AppError(
+      'EngineUnsupported',
+      `The wallet engine could not start: ${message}. Check your network/API settings and try again.`,
+      { cause },
+    );
   }
 }

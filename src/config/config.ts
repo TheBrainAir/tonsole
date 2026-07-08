@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { NETWORKS } from './networks.js';
 import { configDir, configFile } from './paths.js';
 import { type Config, ConfigSchema } from './schema.js';
@@ -21,7 +21,16 @@ export function loadConfig(): Config {
   const eng = process.env.TONSOLE_ENGINE;
   if (eng === 'auto' || eng === 'walletkit' || eng === 'toncore') env.engine = eng;
 
-  return ConfigSchema.parse({ ...fromFile, ...env });
+  try {
+    return ConfigSchema.parse({ ...fromFile, ...env });
+  } catch {
+    // A valid-JSON but schema-invalid config would otherwise throw a raw ZodError
+    // out of every command and the TUI launch. Fall back to defaults with a warning.
+    process.stderr.write(
+      `tonsole: WARNING — ${configFile()} is invalid; ignoring it and using defaults. Fix or delete the file.\n`,
+    );
+    return ConfigSchema.parse({ ...env });
+  }
 }
 
 export interface ResolvedApi {
@@ -54,4 +63,7 @@ export function saveConfigPatch(patch: Partial<Config>): void {
   writeFileSync(configFile(), `${JSON.stringify({ ...current, ...patch }, null, 2)}\n`, {
     mode: 0o600,
   });
+  // Re-assert 0600 even on an existing file (config may hold API keys); writeFileSync
+  // does not change the mode of a file that already exists.
+  chmodSync(configFile(), 0o600);
 }

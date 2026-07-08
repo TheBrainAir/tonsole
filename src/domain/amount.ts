@@ -11,6 +11,9 @@ export const TON_DECIMALS = 9;
  * Rejects: negatives, blanks, non-numeric, and more fractional digits than `decimals`.
  */
 export function parseAmount(input: string, decimals: number): bigint {
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 30) {
+    throw new AppError('InvalidAmount', `Invalid token decimals: ${decimals}.`);
+  }
   const s = input.trim();
   if (s === '' || s === '.' || !/^\d*\.?\d*$/.test(s)) {
     throw new AppError('InvalidAmount', `Not a valid amount: "${input}"`);

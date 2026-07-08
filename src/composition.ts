@@ -38,16 +38,18 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<App> {
   if (options.network) config.network = options.network;
 
   const api = resolveApi(config);
+  const indexer = new TonApiClient(api.tonapiUrl, api.tonapiKey);
   const engine = await createEngine({
     choice: config.engine,
     network: config.network,
     toncenterUrl: api.toncenterUrl,
     toncenterKey: api.toncenterKey,
     logger: { warn: (message) => process.stderr.write(`tonsole: ${message}\n`) },
+    // Lets the TON Connect preview show real jetton decimals/symbol.
+    resolveJettonMeta: (master) => indexer.getJettonMeta(master),
   });
 
   const accounts = new AccountService(engine, config);
-  const indexer = new TonApiClient(api.tonapiUrl, api.tonapiKey);
   return {
     config,
     engine,
