@@ -1,0 +1,30 @@
+tonsole
+Copyright (c) 2026 the tonsole authors
+
+This product is licensed under the MIT License (see the LICENSE file).
+
+------------------------------------------------------------------------
+Third-party components
+------------------------------------------------------------------------
+
+The published `tonsole` package bundles some of its dependencies into
+dist/ (via tsup/esbuild) and installs others from npm at install time.
+Those components remain under their own licenses, reproduced/obtained via
+their respective packages. Notable notices:
+
+- qrcode-terminal
+    License: Apache License 2.0
+    Portions of this software are used under the terms of the Apache
+    License, Version 2.0. You may obtain a copy of the License at
+    http://www.apache.org/licenses/LICENSE-2.0
+    The @ton/walletkit dependency, which tonsole bundles into its
+    published build, is licensed under the MIT License (Copyright (c)
+    TonTech).
+
+- All other direct dependencies (including @ton/core, @ton/crypto,
+    @ton/ton, @ton/walletkit, argon2, chalk, clipboardy, commander, ink,
+    jimp, react, and zod) are distributed under the MIT License or other
+    permissive licenses by their respective authors.
+
+For the complete license text of any dependency, see the corresponding
+package under node_modules/<name> or that project's repository.

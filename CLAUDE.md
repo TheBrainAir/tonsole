@@ -103,6 +103,32 @@ cli ─┘        │             └─ network  (IndexerPort: tonapi | toncent
 `secrets/Argon*`, `network/**`, `argon2`, or `@ton/*`. If you need chain/crypto/keystore behavior in the
 UI, go through a service. This compiler-enforces the seam; do not weaken it.
 
+## TUI architecture (fullscreen Ink shell)
+
+The TUI is a **fullscreen alternate-screen app** (Ink 7.1 `alternateScreen: true` in `src/tui/run.tsx`;
+incrementalRendering stays OFF — its line diff corrupts on resize). Key structures:
+
+- **`src/tui/theme.ts`** — ALL visual tokens (colors, borders, symbols, spacing, breakpoints). Never
+  hardcode a color/border literal in `src/tui/**`; add a token.
+- **`src/tui/shell/`** — `viewport.tsx` (`useViewport()`: columns/rows/breakpoint/`contentRows`; the ONLY
+  consumer of `useWindowSize`; fluid fallback pins rows in tests), `keymap.tsx` (layered key dispatch:
+  `app` < `screen` < `overlay`; the newest active overlay masks everything below — this replaced the old
+  `modalOpen` flag; the status bar renders hints from the same registrations), `AppShell.tsx` (persistent
+  Header + StatusBar around every stage; **clips** overly tall screens via `overflowY="hidden"` +
+  `flexShrink={0}` — without the shrink-0 wrapper yoga *squeezes* rows and text overlaps),
+  `StatusBar.tsx` (also `useFlash()` — transient "✓ copied" messages).
+- **Component kit** (`src/tui/components/`): `Panel` (the one bordered box), `ListView` (the one
+  selectable windowed list — sizes itself from `contentRows` via `reservedRows`), `Spinner`/`AsyncView`
+  (loading→error→empty→data ladder), `TextField` (cursor editing + bracketed paste, paste goes through
+  `sanitizeText`), `CenteredModal`+`ConfirmBar` (modal = hidden screen via `display:none` + overlay keymap
+  scope), `Badge`, `EmptyState`. Jettons/NFTs share one `screens/GalleryScreen.tsx` (adapter pattern).
+- **Rules**: screens declare hotkeys via `useKeymap('screen', …)` — never a raw `useInput` for hotkeys
+  (hints and masking come for free). Never keep single-letter bindings active while a TextField has focus.
+  Components owning their own `useInput`/`usePaste` must gate with `useInputGate(...)`. Root width must
+  stay `"100%"` (an absolute width lags one commit on resize and emits wrapped lines that corrupt the
+  frame). `AppShell` clips vertical overflow — put must-see content (e.g. the 24 mnemonic words) at the
+  TOP of a panel.
+
 ## Security model (keystore)
 
 - The single place that touches plaintext mnemonics and native `argon2` is `src/secrets/` (esp.
