@@ -17,9 +17,10 @@ their respective packages. Notable notices:
     Portions of this software are used under the terms of the Apache
     License, Version 2.0. You may obtain a copy of the License at
     http://www.apache.org/licenses/LICENSE-2.0
-    The @ton/walletkit dependency, which tonsole bundles into its
-    published build, is licensed under the MIT License (Copyright (c)
-    TonTech).
+
+- @ton/walletkit
+    License: MIT (Copyright (c) TonTech)
+    Bundled into tonsole's published build (dist/) by tsup/esbuild.
 
 - All other direct dependencies (including @ton/core, @ton/crypto,
     @ton/ton, @ton/walletkit, argon2, chalk, clipboardy, commander, ink,
