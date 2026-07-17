@@ -12,8 +12,17 @@
 
 export type NetworkId = 'mainnet' | 'testnet';
 
-/** Wallet contract version. W5 (v5r1) is the default; v4r2 is supported for import. */
-export type WalletVersion = 'v5r1' | 'v4r2';
+/**
+ * Wallet contract versions, newest first. W5 (v5r1) is the default; v4r2 is selectable
+ * at create/import for compatibility with wallets that use it. Both support TON Connect;
+ * the WalletKit engine has an adapter for each (see WalletKitEngine.deriveAccount).
+ */
+export const WALLET_VERSIONS = ['v5r1', 'v4r2'] as const;
+export type WalletVersion = (typeof WALLET_VERSIONS)[number];
+
+export function isWalletVersion(value: string): value is WalletVersion {
+  return (WALLET_VERSIONS as readonly string[]).includes(value);
+}
 
 /** A derivable/deployed account. The engine derives this but persists no secrets. */
 export interface AccountRef {

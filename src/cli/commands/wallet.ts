@@ -3,11 +3,31 @@ import type { Command } from 'commander';
 import { buildApp } from '../../composition.js';
 import { AppError } from '../../engine/errors.js';
 import { promptPassphrase, readLine, readLineSecret } from '../../secrets/passphrase.js';
-import type { WalletVersion } from '../../engine/types.js';
+import { WALLET_VERSIONS, isWalletVersion, type WalletVersion } from '../../engine/types.js';
 import { readGlobals } from '../context.js';
 import { info, printJson, renderMnemonic, success, warn } from '../render.js';
 
-const versionFrom = (opts: { v4?: boolean }): WalletVersion => (opts.v4 ? 'v4r2' : 'v5r1');
+interface ContractOpts {
+  contract?: string;
+  /** Deprecated shorthand for `--contract v4r2`; kept so existing scripts don't break. */
+  v4?: boolean;
+}
+
+function versionFrom(opts: ContractOpts): WalletVersion {
+  if (opts.contract !== undefined) {
+    if (!isWalletVersion(opts.contract)) {
+      throw new AppError(
+        'Unknown',
+        `Unknown contract "${opts.contract}" — use ${WALLET_VERSIONS.join(' or ')}.`,
+      );
+    }
+    return opts.contract;
+  }
+  return opts.v4 ? 'v4r2' : 'v5r1';
+}
+
+const CONTRACT_FLAG = '--contract <version>';
+const CONTRACT_DESC = 'wallet contract: v5r1 (W5, default) | v4r2';
 
 export function registerWalletCommands(program: Command): void {
   const wallet = program.command('wallet').description('Create, import and manage wallets');
@@ -15,8 +35,9 @@ export function registerWalletCommands(program: Command): void {
   wallet
     .command('create')
     .description('Create a new wallet and a 24-word recovery phrase')
-    .option('--v4', 'use the v4r2 contract instead of the default v5r1 (W5)')
-    .action(async (opts: { v4?: boolean }, command: Command) => {
+    .option(CONTRACT_FLAG, CONTRACT_DESC)
+    .option('--v4', 'deprecated alias for --contract v4r2')
+    .action(async (opts: ContractOpts, command: Command) => {
       const globals = readGlobals(command);
       const app = await buildApp({ network: globals.network });
       try {
@@ -61,8 +82,9 @@ export function registerWalletCommands(program: Command): void {
     .command('import')
     .description('Import a wallet from an existing 24-word recovery phrase')
     .argument('[words...]', 'the 24 words (omit — and enter them at the hidden prompt — to avoid exposing them)')
-    .option('--v4', 'use the v4r2 contract instead of the default v5r1 (W5)')
-    .action(async (words: string[], opts: { v4?: boolean }, command: Command) => {
+    .option(CONTRACT_FLAG, CONTRACT_DESC)
+    .option('--v4', 'deprecated alias for --contract v4r2')
+    .action(async (words: string[], opts: ContractOpts, command: Command) => {
       const globals = readGlobals(command);
       const app = await buildApp({ network: globals.network });
       try {
@@ -106,7 +128,10 @@ export function registerWalletCommands(program: Command): void {
       const globals = readGlobals(command);
       const app = await buildApp({ network: globals.network });
       try {
-        const accounts = app.accounts.list();
+        // Every wallet, not just the active network's — a user must be able to see that
+        // their other-network wallets still exist, and which ones they cannot use now.
+        const accounts = app.accounts.listAll();
+        const active = app.config.network;
         if (globals.json) {
           printJson(
             accounts.map((a) => ({
@@ -115,6 +140,7 @@ export function registerWalletCommands(program: Command): void {
               network: a.account.network,
               version: a.account.version,
               default: a.isDefault,
+              usable: a.account.network === active,
               label: a.label,
             })),
           );
@@ -125,11 +151,14 @@ export function registerWalletCommands(program: Command): void {
           return;
         }
         for (const a of accounts) {
+          const usable = a.account.network === active;
           const mark = a.isDefault ? chalk.green('*') : ' ';
           const name = a.label
             ? `${chalk.bold(a.label)} ${chalk.dim(a.account.address)}`
             : chalk.bold(a.account.address);
-          info(`${mark} ${name}  ${chalk.dim(`${a.account.network} ${a.account.version} · ${a.id}`)}`);
+          const meta = `${a.account.network} ${a.account.version} · ${a.id}`;
+          const note = usable ? '' : chalk.yellow(`  (not on ${active})`);
+          info(`${mark} ${usable ? name : chalk.dim(name)}  ${chalk.dim(meta)}${note}`);
         }
       } finally {
         await app.dispose();
@@ -182,7 +211,9 @@ export function registerWalletCommands(program: Command): void {
       const globals = readGlobals(command);
       const app = await buildApp({ network: globals.network });
       try {
-        const a = app.accounts.resolve(account);
+        // Network-blind: deleting a keystore is local metadata, so it must not require
+        // switching to that wallet's network first.
+        const a = app.accounts.find(account);
         if (opts.yes !== true) {
           if (process.stdin.isTTY !== true) {
             throw new AppError('Cancelled', 'Refusing to remove without --yes in a non-interactive shell.');

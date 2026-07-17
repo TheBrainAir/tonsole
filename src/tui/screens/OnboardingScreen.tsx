@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink';
 import { useState, type ReactNode } from 'react';
+import type { WalletVersion } from '../../engine/types.js';
 import { SecretString } from '../../secrets/secret-string.js';
 import { ListView, MenuRow } from '../components/ListView.js';
 import { CenteredModal, ConfirmBar } from '../components/Modal.js';
@@ -11,18 +12,22 @@ import { useKeymap } from '../shell/keymap.js';
 import { useViewport } from '../shell/viewport.js';
 import { color, symbol } from '../theme.js';
 
-type Mode = 'menu' | 'create-pass' | 'create-show' | 'import' | 'working' | 'error';
+type Mode = 'menu' | 'create-contract' | 'create-pass' | 'create-show' | 'import' | 'working' | 'error';
 
 const wordCount = (input: string): number => input.trim().split(/\s+/).filter(Boolean).length;
 
 export function OnboardingScreen({
   onDone,
   embedded = false,
+  onSwitchNetwork,
 }: {
   onDone: () => void;
   /** True when pushed from the Accounts screen (adding another wallet):
    *  esc at the menu then falls through to the app-level "back". */
   embedded?: boolean;
+  /** First-run only: reach the network picker before any wallet exists. Omitted in
+   *  embedded mode, where the app-level `N` already covers it. */
+  onSwitchNetwork?: () => void;
 }) {
   const app = useApp();
   const viewport = useViewport();
@@ -40,6 +45,7 @@ export function OnboardingScreen({
   const [confirmSaved, setConfirmSaved] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [importField, setImportField] = useState<'mnemonic' | 'pass'>('mnemonic');
+  const [version, setVersion] = useState<WalletVersion>('v5r1');
 
   const fail = (e: unknown) => {
     setError(e instanceof Error ? e : new Error(String(e)));
@@ -81,7 +87,7 @@ export function OnboardingScreen({
     setPass('');
     setRepeat('');
     app.accounts
-      .create(passphrase)
+      .create(passphrase, { version })
       .then((res) => {
         setMnemonic(res.mnemonic);
         setAddress(res.account.address);
@@ -130,14 +136,27 @@ export function OnboardingScreen({
   useKeymap('screen', [{ key: '⏎', label: 'back to menu', onPress: toMenu }], {
     isActive: mode === 'error',
   });
-  // Menu-mode hints (navigation itself lives in the ListView).
+  // Menu-mode hints (navigation itself lives in the ListView). `N` is only bound at
+  // the menu — the create/import steps have TextFields, and a letter key must never
+  // be live while one has focus.
   useKeymap(
     'screen',
     [
       { key: '↑↓', label: 'move' },
       { key: '⏎', label: 'select' },
+      ...(onSwitchNetwork ? [{ key: 'N', label: 'network', onPress: onSwitchNetwork }] : []),
     ],
     { isActive: mode === 'menu' },
+  );
+  // Contract picker: same navigation, esc steps back to the menu.
+  useKeymap(
+    'screen',
+    [
+      { key: '↑↓', label: 'move' },
+      { key: '⏎', label: 'select' },
+      { key: 'esc', label: 'back to menu', onPress: toMenu },
+    ],
+    { isActive: mode === 'create-contract' },
   );
   // While the wallet is being created/imported, and on the phrase card, nothing
   // may pop this screen (embedded mode has an app-level esc): an overlay scope
@@ -207,8 +226,36 @@ export function OnboardingScreen({
           renderItem={(item, { selected }) => (
             <MenuRow label={item.label} hint={item.hint} selected={selected} />
           )}
-          onActivate={(item) => setMode(item.value === 'create' ? 'create-pass' : 'import')}
+          onActivate={(item) => setMode(item.value === 'create' ? 'create-contract' : 'import')}
         />
+      </Box>,
+    );
+  }
+
+  if (mode === 'create-contract') {
+    const items = [
+      { label: 'v5r1 (W5)', hint: 'default — newest, lowest fees', value: 'v5r1' as const },
+      { label: 'v4r2', hint: 'older contract, for compatibility', value: 'v4r2' as const },
+    ];
+    return card(
+      'Create wallet',
+      `Create ▸ 1 contract ${symbol.bullet} 2 passphrase ${symbol.bullet} 3 recovery phrase ${symbol.bullet} 4 done`,
+      <Box flexDirection="column" marginTop={1}>
+        <Text dimColor>Both support TON Connect. Keep v5r1 unless a service needs v4r2.</Text>
+        <Box flexDirection="column" marginTop={1}>
+          <ListView
+            items={items}
+            wrap
+            maxVisible={items.length}
+            renderItem={(item, { selected }) => (
+              <MenuRow label={item.label} hint={item.hint} selected={selected} />
+            )}
+            onActivate={(item) => {
+              setVersion(item.value);
+              setMode('create-pass');
+            }}
+          />
+        </Box>
       </Box>,
     );
   }

@@ -6,20 +6,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [0.1.0] — 2026-07-17
 
-- Wallet contract version picker at create/import: **v5r1 (W5, default), v4r2, v3r2, v3r1** —
-  `--contract <version>` in the CLI and a selection step in the TUI onboarding.
-  v3 wallets support balances, history, receive and sends (GRAM, jettons, NFTs) with the
-  emulation preview; TON Connect requires v4r2/v5r1.
+Initial public release. Published to npm as `@thebrainair/tonsole` (the command is `tonsole`).
 
-## [0.1.0] — unreleased
-
-Initial public release.
+### Wallet & keys
 
 - Encrypted keystore (Argon2id + AES-256-GCM, Web3 Secret Storage v3), create/import wallets
+- Wallet contract picker at create/import: **v5r1 (W5, default)** and **v4r2**, via
+  `--contract <version>` in the CLI and a selection step in the TUI onboarding
+
+### Balances, transfers & history
+
 - Balances (GRAM + jettons), send with emulation preview + confirmation, receive + QR
 - Transaction history, NFTs (view + transfer), `.ton` DNS resolution, send-max
-- TON Connect: approve dApp connections and transactions from the terminal
+
+### Networks
+
+- **Testnet and mainnet**, both first-class. Switch with `tonsole network use <network>` (persisted),
+  the `-n/--network` flag (per command), or `TONSOLE_NETWORK` (per shell), and with <kbd>N</kbd> in the TUI
+- **Wallets are network-scoped**: a wallet is refused on a network other than the one it was created on,
+  rather than silently querying the wrong chain. The default wallet is tracked per network
+
+### Interfaces
+
 - Full-screen Ink TUI plus scriptable CLI (`--json`)
-- Defaults to **testnet** on first run
+- TON Connect: approve dApp connections and transactions from the terminal
+
+[Unreleased]: https://github.com/TheBrainAir/tonsole/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/TheBrainAir/tonsole/releases/tag/v0.1.0

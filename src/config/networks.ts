@@ -1,4 +1,19 @@
+import { AppError } from '../engine/errors.js';
 import type { NetworkId } from '../engine/types.js';
+
+export const NETWORK_IDS = ['mainnet', 'testnet'] as const;
+
+export function isNetworkId(value: string): value is NetworkId {
+  return (NETWORK_IDS as readonly string[]).includes(value);
+}
+
+/** Validate a user-supplied network name (CLI flag, TUI picker). */
+export function parseNetworkId(value: string): NetworkId {
+  if (!isNetworkId(value)) {
+    throw new AppError('Unknown', `Unknown network "${value}" — use "mainnet" or "testnet".`);
+  }
+  return value;
+}
 
 export interface NetworkPreset {
   id: NetworkId;

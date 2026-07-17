@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { AppError } from '../engine/errors.js';
+import { parseNetworkId } from '../config/networks.js';
 import type { NetworkId } from '../engine/types.js';
 
 export interface CliGlobals {
@@ -10,12 +10,7 @@ export interface CliGlobals {
 /** Read the global `--network` / `--json` options (merged from parent commands). */
 export function readGlobals(command: Command): CliGlobals {
   const opts = command.optsWithGlobals();
-  let network: NetworkId | undefined;
   const n: unknown = opts.network;
-  if (n === 'mainnet' || n === 'testnet') {
-    network = n;
-  } else if (typeof n === 'string') {
-    throw new AppError('Unknown', `Unknown network "${n}" — use "mainnet" or "testnet".`);
-  }
+  const network = typeof n === 'string' ? parseNetworkId(n) : undefined;
   return { network, json: opts.json === true };
 }

@@ -1,5 +1,6 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { NETWORKS } from './networks.js';
+import type { NetworkId } from '../engine/types.js';
+import { NETWORKS, isNetworkId } from './networks.js';
 import { configDir, configFile } from './paths.js';
 import { type Config, ConfigSchema } from './schema.js';
 
@@ -7,17 +8,40 @@ import { type Config, ConfigSchema } from './schema.js';
  * Resolve effective config: defaults -> config.json -> environment overrides.
  * CLI flags are layered on top by the cli layer.
  */
-export function loadConfig(): Config {
-  let fromFile: Record<string, unknown> = {};
+function readConfigFile(): Record<string, unknown> {
   try {
-    fromFile = JSON.parse(readFileSync(configFile(), 'utf8')) as Record<string, unknown>;
+    return JSON.parse(readFileSync(configFile(), 'utf8')) as Record<string, unknown>;
   } catch {
     // No config file yet -> schema defaults (testnet, auto engine).
+    return {};
   }
+}
+
+/**
+ * The network saved in config.json, ignoring `TONSOLE_NETWORK` and defaults.
+ *
+ * `loadConfig()` returns the *effective* network, and env wins over the file — so
+ * `network use` must compare against this to know whether the value it just saved
+ * will actually take effect, rather than reporting success while the env pins the
+ * session to another network.
+ */
+export function configFileNetwork(): NetworkId | undefined {
+  const raw = readConfigFile().network;
+  return typeof raw === 'string' && isNetworkId(raw) ? raw : undefined;
+}
+
+/** The `TONSOLE_NETWORK` override, if it is set to a valid network. */
+export function envNetwork(): NetworkId | undefined {
+  const net = process.env.TONSOLE_NETWORK;
+  return net !== undefined && isNetworkId(net) ? net : undefined;
+}
+
+export function loadConfig(): Config {
+  const fromFile = readConfigFile();
 
   const env: Record<string, unknown> = {};
-  const net = process.env.TONSOLE_NETWORK;
-  if (net === 'mainnet' || net === 'testnet') env.network = net;
+  const net = envNetwork();
+  if (net) env.network = net;
   const eng = process.env.TONSOLE_ENGINE;
   if (eng === 'auto' || eng === 'walletkit' || eng === 'toncore') env.engine = eng;
 
@@ -53,12 +77,7 @@ export function resolveApi(config: Config): ResolvedApi {
 
 /** Shallow-merge a patch into config.json (creating it with 0600 perms if absent). */
 export function saveConfigPatch(patch: Partial<Config>): void {
-  let current: Record<string, unknown> = {};
-  try {
-    current = JSON.parse(readFileSync(configFile(), 'utf8')) as Record<string, unknown>;
-  } catch {
-    // no existing config
-  }
+  const current = readConfigFile();
   mkdirSync(configDir(), { recursive: true, mode: 0o700 });
   writeFileSync(configFile(), `${JSON.stringify({ ...current, ...patch }, null, 2)}\n`, {
     mode: 0o600,
