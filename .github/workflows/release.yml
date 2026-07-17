@@ -62,10 +62,17 @@ jobs:
       # Create the Release FIRST: npm publish is not idempotent (a retry after a
       # successful publish 403s on EPUBLISHCONFLICT), so if it ran first a failed
       # release step could never be re-run to completion.
-      - name: Create the GitHub Release
+      # Idempotent so the workflow can be re-run after adding NPM_TOKEN: create the
+      # Release the first time, just refresh its notes if it already exists.
+      - name: Create or update the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file RELEASE_NOTES.md --verify-tag
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" --notes-file RELEASE_NOTES.md
+          else
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file RELEASE_NOTES.md --verify-tag
+          fi
 
       # Skip (don't fail) when NPM_TOKEN isn't configured yet, so a maintainer can cut a
       # GitHub Release before wiring up npm. Add the secret and re-run to publish.
