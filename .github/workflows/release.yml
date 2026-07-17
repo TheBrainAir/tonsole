@@ -67,7 +67,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file RELEASE_NOTES.md --verify-tag
 
+      # Skip (don't fail) when NPM_TOKEN isn't configured yet, so a maintainer can cut a
+      # GitHub Release before wiring up npm. Add the secret and re-run to publish.
+      - name: Check for an npm token
+        id: npm
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::NPM_TOKEN is not set — skipping npm publish. Add it to the 'release' environment and re-run to publish."
+          fi
+
       - name: Publish to npm (with provenance)
+        if: steps.npm.outputs.present == 'true'
         run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
