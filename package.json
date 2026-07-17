@@ -47,7 +47,6 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "spike": "tsx spike/walletkit-node.ts",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

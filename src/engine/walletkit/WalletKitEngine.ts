@@ -236,7 +236,7 @@ function mapEmulatedPreview(
 // statically bind and whose internal relative imports raw Node cannot resolve. A
 // dynamic import yields the full namespace and works in both runtimes: tsx fixes
 // resolution in dev, and tsup bundles @ton/walletkit (noExternal) so esbuild inlines
-// and fixes it for the published bin. See spike/FINDINGS.md.
+// and fixes it for the published bin.
 // Silence WalletKit's console logger (defaults to ERROR) so its internal logs
 // never corrupt the Ink TUI; user-facing errors are surfaced via our handlers.
 // Honour an explicit override if the user set one.
