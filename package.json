@@ -23,7 +23,7 @@
   },
   "type": "module",
   "bin": {
-    "tonsole": "./dist/index.js"
+    "tonsole": "dist/index.js"
   },
   "files": [
     "dist",
