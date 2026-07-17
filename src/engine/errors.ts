@@ -14,6 +14,7 @@ export type AppErrorCode =
   | 'InvalidMnemonic'
   | 'KeystoreNotFound'
   | 'KeystoreLocked'
+  | 'NetworkMismatch'
   | 'WrongPassphrase'
   | 'EngineUnsupported'
   | 'BridgeError'
@@ -56,6 +57,7 @@ export const EXIT_CODES: Record<AppErrorCode, number> = {
   RateLimited: 8,
   EngineUnsupported: 9,
   BridgeError: 10,
+  NetworkMismatch: 11,
   Cancelled: 0,
 };
 

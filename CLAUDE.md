@@ -157,15 +157,28 @@ incrementalRendering stays OFF — its line diff corrupts on resize). Key struct
 
 M0 scaffold + spike ✅ → M1 keystore + create/import + balance + receive ✅ → M2 send TON (emulate/confirm) +
 history ✅ → M3 jettons ✅ → **M4 full Ink TUI = v1 ✅** → M5 TON Connect ✅ → M6 NFTs ✅ (view + transfer).
-The `tonsole` bin + tsup bundle are publishable (`npm i -g tonsole`); the actual npm publish is the user's call.
-The TUI launches on `tonsole` with no args (a real TTY); CLI subcommands otherwise. `src/tui/run.tsx` is a
-dynamic import so CLI commands don't load Ink.
-Default wallet contract is **W5 (v5r1)**; v4r2, v3r2 and v3r1 are selectable at create/import (CLI
-`--contract`, TUI picker). v3 wallets send/receive but have no TON Connect (a WalletKit limit). Network
-defaults to **testnet** on first run.
+The `tonsole` bin + tsup bundle are publishable as **`@thebrainair/tonsole`** (`npm i -g @thebrainair/tonsole`;
+the bare name `tonsole` was already taken on npm). The command stays `tonsole`. The actual npm publish runs
+from CI on a `v*` tag (`.github/workflows/release.yml`), not locally — `publishConfig.provenance` makes a
+local publish fail by design. The TUI launches on `tonsole` with no args (a real TTY); CLI subcommands
+otherwise. `src/tui/run.tsx` is a dynamic import so CLI commands don't load Ink.
+Default wallet contract is **W5 (v5r1)**; **v4r2** is also selectable at create/import (CLI
+`--contract v5r1|v4r2`, TUI onboarding picker). Both support TON Connect. `WALLET_VERSIONS` in
+`src/engine/types.ts` is the single source of the supported set (v3 is not supported — WalletKit has no v3
+adapter).
+
+**Networks are first-class and wallet-scoping is a safety property.** `config.network` is the active
+network (source of truth for behavior); every keystore records its own `network`. `AccountService.list()`
+filters to the active network and `resolve()` throws `NetworkMismatch` for an off-network wallet — so a
+testnet wallet can never silently transact on mainnet. `listAll()`/`find()` are the network-blind
+lookups for display and local metadata ops (rename/remove). The default wallet is per-network
+(`config.defaultAccounts`, with the pre-0.1 flat `defaultAccount` read as a fallback). Switch persistently
+with `tonsole network use <n>` (CLI) or <kbd>N</kbd> (TUI, which rebuilds the engine in `run.tsx`);
+`TONSOLE_NETWORK` overrides the saved default per shell, and the switch code warns rather than lying when
+it is set. Network defaults to **testnet** on first run.
 
 ## Packaging note
 
-Distribution is a normal global npm package (`npm i -g tonsole`), **not** a single binary: `argon2` is a
+Distribution is a normal global npm package (`npm i -g @thebrainair/tonsole`), **not** a single binary: `argon2` is a
 native `node-gyp-build` addon and can't be statically inlined. `tsup` bundles `src/` and keeps `argon2`,
 `@ton/*`, `ink`, `react`, `clipboardy` **external** (installed by npm).

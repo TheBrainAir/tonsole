@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AppError } from '../engine/errors.js';
+import { WALLET_VERSIONS } from '../engine/types.js';
 import type { Keystore } from './ArgonKeystore.js';
 
 /**
@@ -24,7 +25,7 @@ export const KdfParamsSchema = z.object({
 });
 
 const TonMetaSchema = z.object({
-  walletVersion: z.enum(['v5r1', 'v4r2']),
+  walletVersion: z.enum(WALLET_VERSIONS),
   workchain: z.number().int(),
   network: z.enum(['mainnet', 'testnet']),
   address: z.string().min(1),

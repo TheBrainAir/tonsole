@@ -366,3 +366,74 @@ describe('TUI', () => {
     unmount();
   });
 });
+
+const ARROW_UP = '[A';
+const ESC = '';
+
+describe('TUI network switching', () => {
+  it('opens the picker on N and reports the switch to the host', async () => {
+    const switched: string[] = [];
+    const { lastFrame, stdin, unmount } = render(
+      <TonsoleApp
+        app={fakeApp({ accountsList: [account] })}
+        onSwitchNetwork={async (n) => {
+          switched.push(n);
+        }}
+      />,
+    );
+    await delay(50);
+    expect(stripAnsi(lastFrame() ?? '')).toContain('network'); // advertised in the status bar
+
+    stdin.write('N');
+    await delay(50);
+    expect(stripAnsi(lastFrame() ?? '')).toContain('Network');
+
+    // The picker opens on the active network (testnet, index 1); ↑ moves to mainnet.
+    stdin.write(ARROW_UP);
+    await delay(20);
+    stdin.write('\r');
+    await delay(50);
+    expect(switched).toEqual(['mainnet']);
+    unmount();
+  });
+
+  it('does not offer the picker when the host cannot rebuild the engine', async () => {
+    // No onSwitchNetwork (e.g. the embedded test harness): N must be inert rather
+    // than opening a modal that could only pretend to switch.
+    const { lastFrame, stdin, unmount } = render(<TonsoleApp app={fakeApp({ accountsList: [account] })} />);
+    await delay(50);
+    stdin.write('N');
+    await delay(50);
+    expect(stripAnsi(lastFrame() ?? '')).not.toContain('Network');
+    unmount();
+  });
+
+  it('keeps esc navigating back after N was added to the app scope', async () => {
+    const { lastFrame, stdin, unmount } = render(
+      <TonsoleApp app={fakeApp({ accountsList: [account] })} onSwitchNetwork={async () => {}} />,
+    );
+    await delay(50);
+    stdin.write('h'); // dashboard -> history
+    await delay(50);
+    expect(stripAnsi(lastFrame() ?? '')).not.toContain('Recent activity');
+
+    // The app scope holds esc AND N; gating that scope with isActive (rather than
+    // guarding N internally) would silently kill back-navigation everywhere.
+    stdin.write(ESC);
+    await delay(50);
+    expect(stripAnsi(lastFrame() ?? '')).toContain('Recent activity');
+    unmount();
+  });
+
+  it('reaches the picker from first-run onboarding, before any wallet exists', async () => {
+    const { lastFrame, stdin, unmount } = render(
+      <TonsoleApp app={fakeApp({ accountsList: [] })} onSwitchNetwork={async () => {}} />,
+    );
+    await delay(50);
+    expect(stripAnsi(lastFrame() ?? '')).toContain('Welcome to tonsole');
+    stdin.write('N');
+    await delay(50);
+    expect(stripAnsi(lastFrame() ?? '')).toContain('Network');
+    unmount();
+  });
+});

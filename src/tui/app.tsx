@@ -1,7 +1,7 @@
 import { Box, Text, useApp as useInkApp, useInput } from 'ink';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { App } from '../composition.js';
-import { saveConfigPatch } from '../config/config.js';
+import { envNetwork, saveConfigPatch } from '../config/config.js';
 import { DISCLAIMER_VERSION } from '../config/schema.js';
 import { sameAddress } from '../domain/address.js';
 import { AppError } from '../engine/errors.js';
@@ -9,11 +9,13 @@ import type {
   AccountRef,
   ConnectRequest,
   ConnectTxRequest,
+  NetworkId,
   TonConnectSessionInfo,
 } from '../engine/types.js';
 import type { TonConnect } from '../engine/WalletEngine.js';
 import { SecretString } from '../secrets/secret-string.js';
-import type { StoredAccount } from '../services/AccountService.js';
+import { walletCountsByNetwork, type StoredAccount } from '../services/AccountService.js';
+import { NetworkSwitch } from './components/NetworkSwitch.js';
 import { ConnectPrompt, TxPrompt } from './components/RequestPrompt.js';
 import { AppProvider, useApp } from './context.js';
 import { AccountsScreen } from './screens/AccountsScreen.js';
@@ -42,19 +44,27 @@ export type Screen =
   | 'accounts'
   | 'add-wallet';
 
-export function TonsoleApp({ app, fullscreen = false }: { app: App; fullscreen?: boolean }) {
+export function TonsoleApp({
+  app,
+  fullscreen = false,
+  onSwitchNetwork,
+}: {
+  app: App;
+  fullscreen?: boolean;
+  onSwitchNetwork?: (network: NetworkId) => Promise<void>;
+}) {
   return (
     <AppProvider value={app}>
       <ViewportProvider fullscreen={fullscreen}>
         <KeymapProvider>
-          <Root />
+          <Root onSwitchNetwork={onSwitchNetwork} />
         </KeymapProvider>
       </ViewportProvider>
     </AppProvider>
   );
 }
 
-function Root() {
+function Root({ onSwitchNetwork }: { onSwitchNetwork?: (network: NetworkId) => Promise<void> }) {
   const app = useApp();
   const [version, setVersion] = useState(0);
   const [accepted, setAccepted] = useState(
@@ -62,6 +72,7 @@ function Root() {
   );
   const accounts = useMemo(() => app.accounts.list(), [app, version]);
   const reload = () => setVersion((v) => v + 1);
+  const network = useNetworkSwitch(onSwitchNetwork);
 
   if (!accepted) {
     return (
@@ -81,16 +92,88 @@ function Root() {
     );
   }
   if (accounts.length === 0) {
+    // The switcher must be reachable here too: onboarding renders outside `Main`, so a
+    // TUI-only user with no wallet yet would otherwise have no way to reach mainnet.
     return (
       <AppShell stage="onboarding" network={app.config.network}>
-        <OnboardingScreen onDone={reload} />
+        {network.overlay}
+        <Box display={network.open ? 'none' : 'flex'} flexDirection="column" flexGrow={1}>
+          <OnboardingScreen onDone={reload} onSwitchNetwork={network.open ? undefined : network.request} />
+        </Box>
       </AppShell>
     );
   }
-  return <Main accounts={accounts} onReload={reload} />;
+  return <Main accounts={accounts} onReload={reload} network={network} />;
 }
 
-function Main({ accounts, onReload }: { accounts: StoredAccount[]; onReload: () => void }) {
+export interface NetworkSwitchState {
+  open: boolean;
+  request: () => void;
+  overlay: ReactNode;
+}
+
+/**
+ * The network picker, owned at the root so every stage (onboarding included) can raise
+ * it. The actual switch is `onSwitchNetwork`, which rebuilds the engine in `run.tsx` —
+ * this hook only drives the modal and reports failures.
+ */
+function useNetworkSwitch(onSwitchNetwork?: (network: NetworkId) => Promise<void>): NetworkSwitchState {
+  const app = useApp();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!onSwitchNetwork) {
+    return { open: false, request: () => {}, overlay: null };
+  }
+
+  const close = () => {
+    setOpen(false);
+    setError(null);
+  };
+
+  const select = (next: NetworkId) => {
+    if (next === app.config.network) {
+      close();
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    onSwitchNetwork(next)
+      // On success this tree is remounted with the new app, so there is no state to
+      // reset; only the failure path returns to this component.
+      .catch((e: unknown) => {
+        setBusy(false);
+        setError(e instanceof Error ? e.message : String(e));
+      });
+  };
+
+  return {
+    open,
+    request: () => setOpen(true),
+    overlay: open ? (
+      <NetworkSwitch
+        active={app.config.network}
+        counts={walletCountsByNetwork()}
+        envPinnedTo={envNetwork()}
+        onSelect={select}
+        onCancel={close}
+        busy={busy}
+        error={error ?? undefined}
+      />
+    ) : null,
+  };
+}
+
+function Main({
+  accounts,
+  onReload,
+  network,
+}: {
+  accounts: StoredAccount[];
+  onReload: () => void;
+  network: NetworkSwitchState;
+}) {
   const app = useApp();
   const { exit } = useInkApp();
   const [selectedId, setSelectedId] = useState(
@@ -233,6 +316,9 @@ function Main({ accounts, onReload }: { accounts: StoredAccount[]; onReload: () 
   // the keymap, so the key still performs its normal action.
   useInput(() => setTcError(null), { isActive: tcError !== null });
 
+  // The `app` layer is NOT masked while a TextField has focus (only `screen` scopes
+  // deactivate), so every letter here must gate on `atRoot` internally rather than
+  // via `isActive` — which would also disable `esc`, i.e. all back-navigation.
   useKeymap('app', [
     { key: 'esc', label: atRoot ? undefined : 'back', onPress: () => back() },
     {
@@ -240,6 +326,13 @@ function Main({ accounts, onReload }: { accounts: StoredAccount[]; onReload: () 
       label: atRoot ? 'quit' : undefined,
       onPress: () => {
         if (atRoot) exit();
+      },
+    },
+    {
+      key: 'N',
+      label: atRoot ? 'network' : undefined,
+      onPress: () => {
+        if (atRoot) network.request();
       },
     },
   ]);
@@ -261,7 +354,9 @@ function Main({ accounts, onReload }: { accounts: StoredAccount[]; onReload: () 
     <TonConnectProvider value={controller}>
       <AppShell
         stage="main"
-        network={selected.account.network}
+        // The active network, not the wallet's — the guard keeps them equal, and the
+        // badge must report where the app is pointed regardless of what is selected.
+        network={app.config.network}
         account={{ label: selected.label, address: selected.account.address }}
         connection={
           unlocked && connectedAccount
@@ -274,8 +369,8 @@ function Main({ accounts, onReload }: { accounts: StoredAccount[]; onReload: () 
         banner={banner}
       >
         {/* The screen stays mounted (form state survives) but hidden and input-gated
-            while a dApp prompt is showing. */}
-        <Box display={pending ? 'none' : 'flex'} flexDirection="column" flexGrow={1}>
+            while a dApp prompt or the network picker is showing. */}
+        <Box display={pending || network.open ? 'none' : 'flex'} flexDirection="column" flexGrow={1}>
           <CurrentScreen
             screen={screen}
             account={selected}
@@ -309,6 +404,8 @@ function Main({ accounts, onReload }: { accounts: StoredAccount[]; onReload: () 
         ) : pendingTx ? (
           <TxPrompt req={pendingTx} waiting={txQueue.length - 1} onResolve={resolveTx} />
         ) : null}
+        {/* A dApp prompt (system layer) outranks the picker; don't also stack it visually. */}
+        {!pending && network.overlay}
       </AppShell>
     </TonConnectProvider>
   );

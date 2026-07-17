@@ -62,6 +62,20 @@ describe('parseKeystore', () => {
     k.version = 2;
     expect(() => parseKeystore(k)).toThrow();
   });
+
+  it('accepts every supported wallet contract version', () => {
+    for (const walletVersion of ['v5r1', 'v4r2']) {
+      const k = validKeystore();
+      (k.ton as Mut).walletVersion = walletVersion;
+      expect(() => parseKeystore(k)).not.toThrow();
+    }
+  });
+
+  it('rejects an unknown wallet contract version', () => {
+    const k = validKeystore();
+    (k.ton as Mut).walletVersion = 'v3r2';
+    expect(() => parseKeystore(k)).toThrow();
+  });
 });
 
 describe('assertSafeKdfParams', () => {

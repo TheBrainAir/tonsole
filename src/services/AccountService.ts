@@ -4,7 +4,8 @@ import { parseAddress, toRaw } from '../domain/address.js';
 import { normalizeMnemonic } from '../domain/mnemonic.js';
 import { AppError } from '../engine/errors.js';
 import type { SigningContext, WalletEngine } from '../engine/WalletEngine.js';
-import type { AccountRef, WalletVersion } from '../engine/types.js';
+import type { AccountRef, NetworkId, WalletVersion } from '../engine/types.js';
+import type { Keystore } from '../secrets/ArgonKeystore.js';
 import { type KeystoreTonMeta, decryptKeystore, encryptKeystore } from '../secrets/ArgonKeystore.js';
 import { deleteKeystore, findKeystore, listKeystores, saveKeystore } from '../secrets/keystore-file.js';
 import type { SecretString } from '../secrets/secret-string.js';
@@ -14,6 +15,16 @@ export interface StoredAccount {
   account: AccountRef;
   isDefault: boolean;
   label?: string;
+}
+
+/**
+ * How many wallets exist per network. Standalone because `tonsole network` must work
+ * without an engine — that command is the way out of an unreachable network.
+ */
+export function walletCountsByNetwork(): Record<NetworkId, number> {
+  const counts: Record<NetworkId, number> = { mainnet: 0, testnet: 0 };
+  for (const { keystore } of listKeystores()) counts[keystore.ton.network] += 1;
+  return counts;
 }
 
 function accountFromMeta(meta: KeystoreTonMeta): AccountRef {
@@ -60,38 +71,113 @@ export class AccountService {
     return this.#persist(mnemonic, passphrase, opts?.version);
   }
 
-  list(): StoredAccount[] {
-    const def = this.config.defaultAccount;
-    return listKeystores().map(({ keystore }) => ({
+  /** The default wallet for a network, honouring the pre-0.1 single-slot config. */
+  #defaultFor(network: NetworkId): string | undefined {
+    return this.config.defaultAccounts[network] ?? this.#legacyDefaultFor(network);
+  }
+
+  /** The old flat `defaultAccount`, but only if it names a wallet on this network. */
+  #legacyDefaultFor(network: NetworkId): string | undefined {
+    const legacy = this.config.defaultAccount;
+    if (!legacy) return undefined;
+    const found = listKeystores().find(
+      ({ keystore }) => keystore.id === legacy || keystore.address === legacy,
+    );
+    return found?.keystore.ton.network === network ? found.keystore.id : undefined;
+  }
+
+  #toStored(keystore: Keystore): StoredAccount {
+    const def = this.#defaultFor(keystore.ton.network);
+    return {
       id: keystore.id,
       account: accountFromMeta(keystore.ton),
       isDefault: keystore.id === def || keystore.address === def,
       label: keystore.label,
-    }));
+    };
   }
 
-  /** Resolve a specific wallet (by id/address), else the default, else the only one. */
+  /**
+   * Wallets usable right now — those on the active network. A wallet is bound to the
+   * network it was derived on, so listing the others here would invite operating on a
+   * wallet that every chain call is about to reject. Use `listAll` to show them.
+   */
+  list(): StoredAccount[] {
+    return this.listAll().filter((a) => a.account.network === this.config.network);
+  }
+
+  /** Every stored wallet, on any network. For display only — see `list`. */
+  listAll(): StoredAccount[] {
+    return listKeystores().map(({ keystore }) => this.#toStored(keystore));
+  }
+
+  /**
+   * Look a wallet up by id/address regardless of network. For operations that only
+   * touch local keystore metadata (rename, remove, showing a confirmation prompt) —
+   * never for chain operations, which must go through `resolve`.
+   */
+  find(idOrAddress: string): StoredAccount {
+    const found = findKeystore(idOrAddress);
+    if (!found) throw new AppError('KeystoreNotFound', `No wallet matching "${idOrAddress}".`);
+    return this.#toStored(found.keystore);
+  }
+
+  /**
+   * Resolve a wallet for use on the active network (by id/address, else the default,
+   * else the only one). Refuses a wallet from another network: its keys are valid but
+   * its address is tagged for the other chain, so every balance/send would silently
+   * address the wrong network.
+   */
   resolve(idOrAddress?: string): StoredAccount {
-    const all = this.list();
-    if (all.length === 0) {
-      throw new AppError('KeystoreNotFound', 'No wallets yet — run `tonsole wallet create`.');
+    const usable = this.list();
+    const key = idOrAddress ?? this.#defaultFor(this.config.network);
+
+    if (key) {
+      const found = usable.find((a) => a.id === key || a.account.address === key);
+      if (found) return found;
+      // Name the real problem when the wallet exists but lives on the other network.
+      const offNetwork = this.listAll().find((a) => a.id === key || a.account.address === key);
+      if (offNetwork) throw this.#mismatch(offNetwork);
+      // A stale default pointing at a deleted wallet must not mask the usable ones.
+      if (idOrAddress) throw new AppError('KeystoreNotFound', `No wallet matching "${key}".`);
     }
-    const key = idOrAddress ?? this.config.defaultAccount;
-    if (!key) {
-      if (all.length === 1) return all[0]!;
-      throw new AppError(
-        'KeystoreNotFound',
-        'Multiple wallets found — pass one or set a default with `tonsole wallet use <id>`.',
-      );
+
+    if (usable.length === 0) throw this.#noWalletsHere();
+    if (usable.length === 1) return usable[0]!;
+    throw new AppError(
+      'KeystoreNotFound',
+      `Multiple ${this.config.network} wallets — pass one or set a default with \`tonsole wallet use <id>\`.`,
+    );
+  }
+
+  #mismatch(account: StoredAccount): AppError {
+    const name = account.label ?? account.id;
+    return new AppError(
+      'NetworkMismatch',
+      `Wallet "${name}" is a ${account.account.network} wallet, but the active network is ${this.config.network}.\n` +
+        `  tonsole network use ${account.account.network.padEnd(8)}  — switch to that network\n` +
+        `  tonsole wallet import …    — add a ${this.config.network} wallet`,
+    );
+  }
+
+  #noWalletsHere(): AppError {
+    const others = this.listAll();
+    if (others.length === 0) {
+      return new AppError('KeystoreNotFound', 'No wallets yet — run `tonsole wallet create`.');
     }
-    const found = all.find((a) => a.id === key || a.account.address === key);
-    if (!found) throw new AppError('KeystoreNotFound', `No wallet matching "${key}".`);
-    return found;
+    const elsewhere = others.filter((a) => a.account.network !== this.config.network);
+    return new AppError(
+      'NetworkMismatch',
+      `No ${this.config.network} wallets. You have ${elsewhere.length} wallet(s) on ${[
+        ...new Set(elsewhere.map((a) => a.account.network)),
+      ].join(', ')}.\n` +
+        `  tonsole network use ${elsewhere[0]!.account.network.padEnd(8)}  — switch to that network\n` +
+        `  tonsole wallet create      — create a ${this.config.network} wallet`,
+    );
   }
 
   setDefault(idOrAddress: string): StoredAccount {
     const acct = this.resolve(idOrAddress);
-    saveConfigPatch({ defaultAccount: acct.id });
+    this.#saveDefault(acct.account.network, acct.id);
     return acct;
   }
 
@@ -100,18 +186,41 @@ export class AccountService {
     const found = findKeystore(idOrAddress);
     if (!found) throw new AppError('KeystoreNotFound', `No wallet matching "${idOrAddress}".`);
     saveKeystore({ ...found.keystore, label: label.trim() || undefined });
-    return this.resolve(found.keystore.id);
+    // Network-blind: renaming touches only local metadata, so it must not require
+    // switching networks first — and `resolve` here would throw *after* the save.
+    return this.find(found.keystore.id);
   }
 
-  /** Delete a wallet's keystore. Reassigns the default if it pointed here. */
+  /** Delete a wallet's keystore. Reassigns that network's default if it pointed here. */
   remove(idOrAddress: string): void {
-    const acct = this.resolve(idOrAddress);
-    const wasDefault =
-      this.config.defaultAccount === acct.id || this.config.defaultAccount === acct.account.address;
+    const acct = this.find(idOrAddress);
+    const network = acct.account.network;
     deleteKeystore(acct.id);
-    if (wasDefault) {
-      saveConfigPatch({ defaultAccount: this.list()[0]?.id });
+    if (!acct.isDefault) return;
+    // Replace with another wallet on the *removed* wallet's network — reassigning from
+    // the active network would silently hand that network's default to a stranger.
+    const replacement = this.listAll().find((a) => a.account.network === network);
+    this.#saveDefault(network, replacement?.id);
+  }
+
+  #saveDefault(network: NetworkId, id: string | undefined): void {
+    const next = { ...this.config.defaultAccounts };
+    // Migrate the pre-0.1 flat default into its OWN network's slot before dropping it,
+    // so writing a default on one network never silently erases the default on another
+    // (the flat value only ever meant a default for the network its wallet lives on).
+    const legacy = this.config.defaultAccount;
+    if (legacy) {
+      const found = listKeystores().find(
+        ({ keystore }) => keystore.id === legacy || keystore.address === legacy,
+      );
+      const legacyNet = found?.keystore.ton.network;
+      if (legacyNet && next[legacyNet] === undefined) next[legacyNet] = found!.keystore.id;
     }
+    // The explicit write wins over a migrated legacy value for the same network.
+    next[network] = id;
+    this.config.defaultAccounts = next;
+    this.config.defaultAccount = undefined;
+    saveConfigPatch({ defaultAccounts: next, defaultAccount: undefined });
   }
 
   /**

@@ -1,5 +1,5 @@
 {
-  "name": "tonsole",
+  "name": "@thebrainair/tonsole",
   "version": "0.1.0",
   "description": "Open-source TUI/CLI wallet for the TON blockchain, built on TON WalletKit.",
   "keywords": [
@@ -15,11 +15,11 @@
   "author": "the tonsole authors",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/thebrainair/tonsole.git"
+    "url": "git+https://github.com/TheBrainAir/tonsole.git"
   },
-  "homepage": "https://github.com/thebrainair/tonsole#readme",
+  "homepage": "https://github.com/TheBrainAir/tonsole#readme",
   "bugs": {
-    "url": "https://github.com/thebrainair/tonsole/issues"
+    "url": "https://github.com/TheBrainAir/tonsole/issues"
   },
   "type": "module",
   "bin": {
@@ -29,9 +29,14 @@
     "dist",
     "LICENSE",
     "README.md",
+    "CHANGELOG.md",
     "DISCLAIMER.md",
     "NOTICE"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=22.12"
   },
