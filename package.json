@@ -69,7 +69,7 @@
     "@types/node": "^22.0.0",
     "@types/qrcode-terminal": "^0.12.0",
     "@types/react": "^19.0.0",
-    "eslint": "^9.0.0",
+    "eslint": "^10.8.0",
     "ink-testing-library": "^4.0.0",
     "tsup": "^8.3.0",
     "tsx": "^4.19.0",
